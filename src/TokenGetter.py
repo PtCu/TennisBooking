@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+import winreg
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -19,6 +20,25 @@ class TokenGetter:
         self.port = 8012
         self.assets_path = Path(__file__).parent / "assets"
         self.src_path = Path(__file__).parent
+        self.proxy_state_path = self.assets_path / "proxy-state.json"
+        self.recover_proxy()
+
+    def recover_proxy(self):
+        if not self.proxy_state_path.exists():
+            return
+        try:
+            proxy = json.loads(self.proxy_state_path.read_text(encoding="utf-8"))
+            if isinstance(proxy, dict):
+                if str(proxy.get("ProxyEnable")) == "1" and not proxy.get("ProxyServer"):
+                    logger.error("上次代理恢复记录无效，保留当前系统代理设置")
+                else:
+                    logger.warning("检测到上次登录未完成，正在恢复系统代理设置")
+                    self.restore_proxy(proxy)
+        except Exception as error:
+            logger.error("恢复系统代理设置失败，请检查网络代理")
+            logger.debug(error, exc_info=True)
+        finally:
+            self.proxy_state_path.unlink(missing_ok=True)
 
     def run_mitmproxy(self):
         subprocess.run(
@@ -54,6 +74,7 @@ class TokenGetter:
     def get_token(self):
         logger.error("准备获取 token, 请稍等...")
         proxy = self.back_up_proxy()
+        self.proxy_state_path.write_text(json.dumps(proxy), encoding="utf-8")
         self.set_proxy()
 
         try:
@@ -75,6 +96,7 @@ class TokenGetter:
             return False
         finally:
             self.restore_proxy(proxy)
+            self.proxy_state_path.unlink(missing_ok=True)
 
     def read_token(self):
         config_path = self.assets_path / "config.json"
@@ -215,35 +237,29 @@ class TokenGetter:
         return False
 
     def back_up_proxy(self):
-        proxy = {
-            "ProxyEnable": "",
-            "ProxyServer": "",
-            "ProxyOverride": "",
-        }
-
-        for name in proxy.keys():
-            cmd = rf'(Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings").{name}'
-            result = subprocess.run(
-                ["powershell", "-Command", cmd], capture_output=True, text=True
-            ).stdout
-            proxy[name] = result.strip()
-
-        return proxy
+        path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
+            values = {}
+            for name, default in (("ProxyEnable", 0), ("ProxyServer", ""), ("ProxyOverride", "")):
+                try:
+                    values[name] = winreg.QueryValueEx(key, name)[0]
+                except FileNotFoundError:
+                    values[name] = default
+        return values
 
     def restore_proxy(self, proxy: dict):
-        for name, value in proxy.items():
-            cmd = rf'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name {name} -Value "{value}"'
-            subprocess.run(["powershell", "-Command", cmd])
+        path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, int(proxy.get("ProxyEnable", 0)))
+            winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, str(proxy.get("ProxyServer", "")))
+            winreg.SetValueEx(key, "ProxyOverride", 0, winreg.REG_SZ, str(proxy.get("ProxyOverride", "")))
 
     def set_proxy(self):
-        proxy = {
-            "ProxyEnable": "1",
-            "ProxyServer": f"127.0.0.1:{self.port}",
-            "ProxyOverride": "<local>",
-        }
-        for name, value in proxy.items():
-            cmd = rf'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name {name} -Value "{value}"'
-            subprocess.run(["powershell", "-Command", cmd])
+        path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 1)
+            winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, f"127.0.0.1:{self.port}")
+            winreg.SetValueEx(key, "ProxyOverride", 0, winreg.REG_SZ, "<local>")
 
 
 # %%

@@ -1,5 +1,6 @@
 **/assets/mitmproxy-ca-cert.cer
 **/assets/config.json
+**/assets/proxy-state.json
 **/assets/v2.html
 logs/
 venv/
