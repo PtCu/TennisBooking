@@ -1,7 +1,10 @@
 # %%
 import json
+import ctypes
 import logging
+import os
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -119,25 +122,22 @@ class TokenGetter:
             logger.error("配置文件不存在")
 
     def check_cert(self):
-        try:
-            cert_info = subprocess.run(
-                ["certutil", "-store", "root"],
-                capture_output=True,
-                check=True,
-                encoding="gb2312",
-            ).stdout
-        except Exception as e:
-            logger.error(f"无法自动检测证书，请确保证书已安装")
-            logger.debug(e, exc_info=True)
-            return True
-
-        if "mitmproxy" in cert_info:
-            return True
-        else:
-            logger.error(
-                "检测到证书未安装，将自动安装证书。请确保使用管理员权限运行此程序"
-            )
-            return False
+        for args in (["certutil", "-user", "-store", "root"], ["certutil", "-store", "root"]):
+            try:
+                cert_info = subprocess.run(
+                    args,
+                    capture_output=True,
+                    check=True,
+                    encoding="gb2312",
+                    errors="replace",
+                ).stdout
+            except Exception as error:
+                logger.debug(error, exc_info=True)
+                continue
+            if "mitmproxy" in cert_info:
+                return True
+        logger.error("未检测到证书，将自动安装到当前用户证书库")
+        return False
 
     def install_cert(self):
         logger.error("正在下载证书...")
@@ -162,31 +162,57 @@ class TokenGetter:
 
         logger.error("证书下载成功，正在安装证书...")
 
-        try:
-            subprocess.run(
-                [
-                    "certutil",
-                    "-addstore",
-                    "root",
-                    (self.assets_path / "mitmproxy-ca-cert.cer").as_posix(),
-                ],
-                capture_output=True,
-                check=True,
-            )
-        except Exception as e:
-            logger.error("证书安装失败，第一次使用请确保使用管理员权限运行此程序")
-            logger.debug(e, exc_info=True)
+        cert_path = self.assets_path / "mitmproxy-ca-cert.cer"
+        if self.install_cert_file(cert_path, user=True):
+            logger.error("证书已安装到当前用户，继续登录")
+            return True
 
-            output = subprocess.run(
-                ["certutil", "-addstore", "root", "mitmproxy-ca-cert.cer"],
-                capture_output=True,
-                encoding="gb2312",
-            ).stdout
-            logger.debug(output)
+        logger.error("当前用户证书库安装失败，正在请求 Windows 权限")
+        return self.install_cert_with_elevation(cert_path)
+
+    @staticmethod
+    def install_cert_file(cert_path: Path, *, user: bool) -> bool:
+        args = ["certutil"]
+        if user:
+            args.append("-user")
+        args.extend(["-addstore", "root", cert_path.as_posix()])
+        try:
+            subprocess.run(args, capture_output=True, check=True)
+        except Exception as error:
+            logger.debug(error, exc_info=True)
+            return False
+        return True
+
+    def install_cert_with_elevation(self, cert_path: Path) -> bool:
+        if os.name != "nt":
             return False
 
-        logger.error("证书安装成功")
-        return True
+        result_path = cert_path.with_suffix(".install-result")
+        result_path.unlink(missing_ok=True)
+        if getattr(sys, "frozen", False):
+            executable = sys.executable
+            arguments = ["--install-cert", cert_path.as_posix(), result_path.as_posix()]
+        else:
+            executable = sys.executable
+            arguments = [str(Path(__file__).resolve()), "--install-cert", cert_path.as_posix(), result_path.as_posix()]
+
+        params = subprocess.list2cmdline(arguments)
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, params, None, 1)
+        if result <= 32:
+            logger.error("用户取消了证书权限确认")
+            return False
+
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            if result_path.exists():
+                success = result_path.read_text(encoding="ascii").strip() == "ok"
+                result_path.unlink(missing_ok=True)
+                if success:
+                    logger.error("证书安装成功，继续登录")
+                return success
+            time.sleep(0.25)
+        logger.error("证书权限确认超时")
+        return False
 
     def back_up_proxy(self):
         proxy = {

@@ -43,7 +43,7 @@ powershell -ExecutionPolicy Bypass -File tools\build_release.ps1 -Python .venv\S
 
 1. 请先安装依赖 [node.js](https://nodejs.org/zh-cn/download)
 2. 强烈建议使用 [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701?hl=zh-CN&gl=CN) 运行程序获得更好的视觉效果
-3. 首次使用请以管理员身份运行，需要安装证书
+3. 首次登录时程序会自动准备证书。通常安装到当前用户即可，需要系统权限时会弹出 Windows 确认框，按提示允许即可
 
 ### 2. 登录 🔐
 

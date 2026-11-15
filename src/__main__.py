@@ -25,6 +25,18 @@ from app import Grounder
 logger = logging.getLogger(__name__)
 
 
+def install_cert_command(args):
+    if len(args) != 3:
+        return 2
+    from TokenGetter import TokenGetter
+
+    cert_path = Path(args[1])
+    result_path = Path(args[2])
+    success = TokenGetter.install_cert_file(cert_path, user=False)
+    result_path.write_text("ok" if success else "fail", encoding="ascii")
+    return 0 if success else 1
+
+
 def config_logger():
     time_str = datetime.now().strftime("%Y_%m_%d_%H%M%S")
     log_path = Path(__file__).parent / "logs"
@@ -41,6 +53,8 @@ def config_logger():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--install-cert":
+        raise SystemExit(install_cert_command(sys.argv[1:]))
     try:
         config_logger()
         app = Grounder()
