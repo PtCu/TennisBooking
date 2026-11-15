@@ -78,6 +78,23 @@ UserInfoPanel {
 }
 
 GroundInfoPanel {
+  #candidate-hint {
+    margin: 0 1;
+  }
+
+  #candidate-summary {
+    margin: 0 1;
+    color: $text-primary;
+  }
+
+  .plan-row {
+    margin: 0 0 0 1;
+
+    Label {
+      width: 12;
+    }
+  }
+
   #ground-sports-select {
     width: 25;
   }
@@ -88,6 +105,19 @@ GroundInfoPanel {
   #ground-venue-label{
     padding: 0 0 0 5;
   }
+
+  #primary-plan-type,
+  #fallback-one-type,
+  #fallback-two-type {
+    width: 18;
+  }
+
+  #primary-plan-count,
+  #fallback-one-count,
+  #fallback-two-count {
+    width: 8;
+  }
+
   #retry-label {
     padding: 0 0 0 0;
   }

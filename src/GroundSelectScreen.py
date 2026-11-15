@@ -106,6 +106,8 @@ class GroundSelectScreen(ModalScreen):
                         "startTime": info["start_time"],
                         "endTime": info["end_time"],
                         "sportsType": info["sportsType"],
+                        "price": info["price"],
+                        "status": info["status"],
                     }
                 )
 

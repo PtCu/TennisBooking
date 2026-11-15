@@ -11,7 +11,33 @@
 
 [Github 下载](https://github.com/XIGUAjuice/Grounder/releases)
 
+## 当前可运行版本 🪟
+
+仓库中的 Windows 单文件程序位于 [dist/Grounder.exe](dist/Grounder.exe)。双击即可启动，程序首次登录仍需要电脑微信、久事体育小程序和本机 Node.js 环境。
+
+程序启动后会在本地保存登录凭证和运行日志。使用手机或其他设备重新打开久事体育小程序，可能会使当前凭证失效，需要重新登录。
+
+## 从源码运行和打包 🔧
+
+在仓库根目录执行以下命令安装依赖并运行源码：
+
+```powershell
+python -m pip install -r requirements.txt
+python src\__main__.py
+```
+
+生成 Windows 单文件程序需要额外安装 Nuitka：
+
+```powershell
+python -m pip install Nuitka
+powershell -ExecutionPolicy Bypass -File tools\build_release.ps1 -Python .venv\Scripts\python.exe
+```
+
+打包完成后，发布文件会写入 `dist\Grounder.exe`。Nuitka 的临时构建目录不会作为发布文件使用。
+
 ## 使用说明 🛠️
+
+订场流程设计见 [docs/booking-flow.md](docs/booking-flow.md)。
 
 ### 1. 安装依赖 📦
 
@@ -32,10 +58,11 @@
 
 1. 登录之后选择包场人信息
 2. 选择运动之后，选择场馆
-3. 点击 「选择场地」，选择需要预定的场地，点击「确定」
+3. 点击「选择候选场次」，选择可接受的场地和时间范围，点击「确定」
     <img align="center" src="src/assets/select.png">
-4. 设置开抢时间和重试参数后，点击 「开始预定」，到时间后会自动下订单
-5. 抢到场地之后会提示去微信小程序付款
+4. 配置主方案和备选方案，可以选择单个场次、同场连续场次或不连续组合
+5. 设置预算、开抢时间和重试参数后，点击「开始预定」
+6. 到时间后程序重新查询库存，按方案顺序提交第一个匹配方案，随后提示去微信小程序付款
 
 > 注意：
 > 1. 不要抢最后一天的场地，最后一天的场地是不开放预定的，显示已订的是场馆内定预留的
