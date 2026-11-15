@@ -79,6 +79,7 @@ class UserInfoPanel(ScrollableContainer):
     async def login(self) -> None:
         if self.js_api.read_token() is False:
             self.js_api.get_token()
+            return
         await self.get_user_info()
 
 

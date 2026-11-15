@@ -13,9 +13,11 @@
 
 ## 当前可运行版本 🪟
 
-仓库中的 Windows 单文件程序位于 [dist/Grounder.exe](dist/Grounder.exe)。双击即可启动，程序首次登录仍需要电脑微信、久事体育小程序和本机 Node.js 环境。
+仓库中的 Windows 单文件程序位于 [dist/Grounder.exe](dist/Grounder.exe)。双击即可启动，程序需要本机 Node.js 环境完成接口签名。
 
-程序启动后会在本地保存登录凭证和运行日志。使用手机或其他设备重新打开久事体育小程序，可能会使当前凭证失效，需要重新登录。
+程序只读取本地保存的登录凭证和运行日志。程序不会修改 Windows 系统代理，不会安装证书，不会拦截微信流量，也不会请求管理员权限。
+
+如果本地没有有效 token，程序会提示后停止登录流程。需要先通过你自己的安全方式准备有效 token，再重新点击登录。
 
 ## 从源码运行和打包 🔧
 
@@ -43,14 +45,13 @@ powershell -ExecutionPolicy Bypass -File tools\build_release.ps1 -Python .venv\S
 
 1. 请先安装依赖 [node.js](https://nodejs.org/zh-cn/download)
 2. 强烈建议使用 [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701?hl=zh-CN&gl=CN) 运行程序获得更好的视觉效果
-3. 首次登录时程序会自动准备证书。通常安装到当前用户即可，需要系统权限时会弹出 Windows 确认框，按提示允许即可
+3. 确认本地配置中已有有效 token。程序不会自动抓取 token，也不会改变系统网络设置
 
 ### 2. 登录 🔐
 
 <img align="center" src="src/assets/log_in.png">
 
-根据提示打开 [微信PC客户端](https://weixin.qq.com/)，打开“久事体育”小程序并登录（如果已经登陆就随便点两下），程序会自动获取 token。
-当提示获取到 token 之后就可以关闭小程序了。
+点击「登录」后，程序会读取本地 token 并验证用户信息。没有 token 或 token 已失效时，程序会明确提示，需要先更新本地 token 后再重试。
 
 > 注意, 在手机或者其他地方再次打开小程序会使 token 失效，需要重新登录
 

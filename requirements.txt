@@ -1,7 +1,6 @@
 textual
 httpx
 pycryptodome
-mitmproxy
 pynput
 zendriver
 PyExecJS
