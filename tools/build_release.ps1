@@ -27,23 +27,23 @@ if (-not $Python) {
 }
 
 if (-not $Python -or -not (Test-Path -LiteralPath $Python)) {
-    throw "找不到 Python。请使用 -Python 指定解释器路径。"
+    throw "Python was not found. Use -Python to specify the interpreter path."
 }
 
 & $Python -m nuitka --version
 if ($LASTEXITCODE -ne 0) {
-    throw "当前 Python 环境没有 Nuitka，请先安装 requirements.txt 和 Nuitka。"
+    throw "Nuitka is not installed in the selected Python environment."
 }
 
 Push-Location $root
 try {
     & $Python -m nuitka --output-dir=dist --assume-yes-for-downloads src\__main__.py
     if ($LASTEXITCODE -ne 0) {
-        throw "Nuitka 打包失败。"
+        throw "Nuitka build failed."
     }
 }
 finally {
     Pop-Location
 }
 
-Write-Host "发布文件已生成：$root\dist\Grounder.exe"
+Write-Host "Release file created: $root\dist\Grounder.exe"

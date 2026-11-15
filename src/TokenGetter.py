@@ -2,6 +2,7 @@
 import json
 import logging
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -28,6 +29,25 @@ class TokenGetter:
             ]
         )
 
+    def wait_for_proxy(self, timeout=8):
+        proxy_url = f"http://127.0.0.1:{self.port}"
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                response = httpx.get(
+                    "http://mitm.it/",
+                    proxy=proxy_url,
+                    trust_env=False,
+                    timeout=1,
+                )
+                if response.status_code < 500:
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.25)
+        logger.error("mitmproxy 启动失败，请检查本机代理端口")
+        return False
+
     def get_token(self):
         logger.error("准备获取 token, 请稍等...")
         proxy = self.back_up_proxy()
@@ -37,7 +57,7 @@ class TokenGetter:
             with ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(self.run_mitmproxy)
                 if not self.check_cert():
-                    if not self.install_cert():
+                    if not self.wait_for_proxy() or not self.install_cert():
                         self.restore_proxy(proxy)
                         executor.shutdown(wait=False)
                         return False
@@ -122,9 +142,15 @@ class TokenGetter:
     def install_cert(self):
         logger.error("正在下载证书...")
         cert_url = "http://mitm.it/cert/cer"
+        proxy_url = f"http://127.0.0.1:{self.port}"
 
         try:
-            response = httpx.get(cert_url)
+            response = httpx.get(
+                cert_url,
+                proxy=proxy_url,
+                trust_env=False,
+                timeout=5,
+            )
             response.raise_for_status()
         except Exception as e:
             logger.error("证书下载失败，请检查网络连接")
