@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-import hashlib
+import random
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -14,8 +14,8 @@ from textual.widgets import Button, Label, Select, Input
 from GroundSelectScreen import GroundSelectScreen
 from JSApi import JSApi, TokenExpiredError
 from ConfirmScreen import ConfirmScreen
-from phone_notify import optional_notifier, NotificationError
-from storage import DATA_DIR, write_json
+from storage import DATA_DIR
+from orders import submit_selection, track_payment, OrderReviewError
 from booking_flow import (
     BookingRequest,
     Plan,
@@ -128,6 +128,15 @@ class GroundInfoPanel(ScrollableContainer):
     def app_load_done(self) -> None:
         self.js_api: JSApi = self.app.js_api
 
+    @on(Select.Changed, "#primary-plan-type")
+    @on(Select.Changed, "#fallback-one-type")
+    @on(Select.Changed, "#fallback-two-type")
+    def update_plan_count(self, event):
+        count = self.query_one("#" + event.select.id.removesuffix("-type") + "-count", Select)
+        count.disabled = event.value in ("disabled", "single_slot")
+        if event.value == "single_slot":
+            count.value = "1"
+
     @on(Button.Pressed, "#stop-button")
     def stop_booking(self):
         self.workers.cancel_group(self, "booking")
@@ -207,57 +216,33 @@ class GroundInfoPanel(ScrollableContainer):
         max_retries: int,
         delay: int,
         jitter_percent: int,
+        api=None,
     ) -> bool:
+        api = api or self.js_api
         timestamp = self._day_timestamp(request)
         for attempt in range(max_retries):
-            open_dates = await self.js_api.get_open_dates(venue_info["venue_id"])
+            open_dates = await api.get_open_dates(venue_info["venue_id"])
             if datetime.fromtimestamp(timestamp / 1000).date() not in open_dates:
                 logger.info("目标日期尚未开放预约，继续等待")
                 if attempt + 1 < max_retries:
-                    await asyncio.sleep(delay / 1000)
+                    await asyncio.sleep(delay / 1000 * random.uniform(1 - jitter_percent / 100, 1 + jitter_percent / 100))
                 continue
-            ground_infos = await self.js_api.get_ground(venue_info["venue_id"], timestamp)
+            ground_infos = await api.get_ground(venue_info["venue_id"], timestamp)
             available_slots = flatten_ground_infos(ground_infos)
             chosen = choose_plan(request, available_slots)
             if chosen is None:
                 logger.info("第 %s 次查询，尚无匹配库存", attempt + 1)
                 if attempt + 1 < max_retries:
-                    await asyncio.sleep(delay / 1000)
+                    await asyncio.sleep(delay / 1000 * random.uniform(1 - jitter_percent / 100, 1 + jitter_percent / 100))
                 continue
 
             selected_plan, selected_slots = chosen
             logger.error(selection_summary(selected_plan, selected_slots))
-            fingerprint = hashlib.sha256(json.dumps([str(venue_info["venue_id"]), str(contact_id), request.candidate_slots], sort_keys=True).encode()).hexdigest()
-            record_path = DATA_DIR / "orders" / f"{fingerprint}.json"
-            record_path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                with record_path.open("x", encoding="utf-8") as output:
-                    json.dump({"state": "submitting", "summary": selection_summary(selected_plan, selected_slots)}, output, ensure_ascii=False)
-            except FileExistsError:
-                logger.error("此任务已有提交记录，请先核对久事官方订单。记录位于 %s", record_path)
-                return False
-            success = await self.js_api.post_book(
-                contact_id=contact_id,
-                venue_id=venue_info["venue_id"],
-                venue_name=venue_info["venue_name"],
-                agency_id=venue_info["agency_id"],
-                agency_name=venue_info["agency_name"],
-                sports_name=venue_info["sports_name"],
-                ground_list=[slot.to_payload() for slot in selected_slots],
-            )
-            if success is True:
-                write_json(record_path, {"state": "submitted", "summary": selection_summary(selected_plan, selected_slots)})
-                logger.info("提交成功，请到久事体育 → 我的订单核对并付款")
-                try:
-                    notifier = optional_notifier(DATA_DIR)
-                    if notifier:
-                        await asyncio.to_thread(notifier.send, "久事订场提交成功 · 请核对付款", "订场接口返回成功。请使用下单账号打开久事体育 → 我的订单 → 待支付，核对日期、场次、金额和官方付款期限后付款。")
-                        logger.info("微信提醒服务已接受消息")
-                except (NotificationError, OSError):
-                    logger.error("微信提醒发送失败，请直接打开久事订单核对付款")
-                return True
-            logger.error("未确认订单成功，请先核对久事官方订单")
-            return False
+            path = await submit_selection(api, request, venue_info, contact_id,
+                                          selected_plan, selected_slots, DATA_DIR)
+            logger.info("官方订单已核对，开始跟踪付款状态")
+            await track_payment(api, path)
+            return True
         return False
 
     @work(exclusive=True, group="booking")
@@ -278,7 +263,7 @@ class GroundInfoPanel(ScrollableContainer):
             max_retries = int(retry_input.value)
             delay = int(delay_input.value)
             jitter_percent = int(jitter_input.value)
-            if not 1 <= max_retries <= 300 or delay < 2000:
+            if not 1 <= max_retries <= 300 or delay < 2000 or not 0 <= jitter_percent <= 50:
                 raise ValueError("查询次数或间隔无效")
         except (ValueError, TypeError, json.JSONDecodeError):
             logger.error("订场条件无效，请检查候选场次、方案和预算")
@@ -288,6 +273,7 @@ class GroundInfoPanel(ScrollableContainer):
         if contact_id is Select.BLANK:
             logger.error("请先选择联系人")
             return
+        api = self.js_api.session_copy()
 
         now = datetime.now()
         target_time = now if self.query_one("#booking-mode", Select).value == "now" else now.replace(
@@ -325,10 +311,14 @@ class GroundInfoPanel(ScrollableContainer):
                 max_retries,
                 delay,
                 jitter_percent,
+                api=api,
             )
         except TokenExpiredError:
-            logger.error("Token 已过期，请重新登录")
-            self.post_message(self.LoggedStatusChanged(self, False))
+            logger.error("凭证已过期，请更新登录")
+            if api.headers.get("token") == self.js_api.headers.get("token"):
+                self.post_message(self.LoggedStatusChanged(self, False))
+        except OrderReviewError as error:
+            logger.error(str(error))
         except Exception as error:
             logger.error("预定失败")
             logger.debug(error, exc_info=True)

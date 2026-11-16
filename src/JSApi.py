@@ -129,6 +129,15 @@ class JSApi:
         else:
             return False
 
+    def session_copy(self):
+        api = JSApi()
+        api.headers = self.headers.copy()
+        api.proxy = self.proxy
+        api.verification = self.verification
+        if hasattr(self, "phone"):
+            api.phone = self.phone
+        return api
+
     def read_token(self):
         token = self.token_getter.read_token()
         if token is not None:
@@ -159,7 +168,6 @@ class JSApi:
 
     def get_cipher_text(self, payload):
         payload_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-        logger.debug(f"payload_str before cipher: {payload_str}")
         cipher_text = self.aes_encrypt(payload_str)
         return cipher_text
 
@@ -177,9 +185,6 @@ class JSApi:
 
     async def js_post(self, url, payload, params=None):
         payload_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-        logger.debug(f"Url: {url}")
-        logger.debug(f"Payload: {payload_str}")
-        logger.debug(f"Params: {params}")
         js_sign = self.post_sign(payload_str)
 
         self.headers["js_sign"] = js_sign
@@ -197,8 +202,6 @@ class JSApi:
                     url, headers=self.headers, data=payload_str
                 )
 
-        logger.debug(f"url: {response.request.url}")
-        logger.debug(f"content: {response.request.content}")
 
         if "token.device.invalid" in response.text:
             raise TokenExpiredError("token expired")
@@ -210,7 +213,7 @@ class JSApi:
             return response
         else:
             logger.debug(f"HTTP Error: {response.status_code}")
-            raise httpx.HTTPStatusError(f"HTTP Error: {response.status_code}")
+            response.raise_for_status()
 
     async def js_get(self, url, params):
         sign = self.get_sign(params)
@@ -222,8 +225,6 @@ class JSApi:
         async with httpx.AsyncClient(proxy=self.proxy, verify=self.verify) as client:
             response = await client.get(url, headers=self.headers, params=params)
 
-        logger.debug(f"url: {response.request.url}")
-        logger.debug(f"content: {response.request.content}")
 
         if "token.device.invalid" in response.text:
             raise TokenExpiredError("token expired")
@@ -231,7 +232,7 @@ class JSApi:
         if response.status_code == 200:
             return response
         else:
-            raise httpx.HTTPStatusError(f"HTTP Error: {response.status_code}")
+            response.raise_for_status()
 
     async def get_ground(self, venue_id, timestamp):
         payload = {
@@ -249,7 +250,6 @@ class JSApi:
             raise
         except Exception as e:
             logger.debug("get_ground() 返回数据格式异常")
-            logger.debug(resp.text)
             logger.debug(e, exc_info=True)
             raise ApiResponseNotExpectedError("API response not as expected")
         return ground_list
@@ -261,6 +261,19 @@ class JSApi:
         if not isinstance(entries, list):
             raise ApiResponseNotExpectedError("无法确认官方开放日期")
         return {datetime.fromtimestamp(int(item["date"]) / 1000).date() for item in entries}
+
+    async def get_order_data(self, path, params):
+        allowed = {"/order/v2-get/getOrderList", "/venue/v2-get/getVenueOrderDetail"}
+        if path not in allowed:
+            raise ValueError("订单查询路径无效")
+        values = {"inWhite": "false", "os_type": self.headers.get("os_type", "wechat_mini"),
+                  **{key: str(value) for key, value in params.items()}}
+        response = await self.js_get("https://jsapp.jussyun.com/jiushi-core" + path,
+                                     values)
+        value = response.json()
+        if str(value.get("rtnCode")) != "10000":
+            raise ApiResponseNotExpectedError("官方订单查询失败")
+        return value.get("data")
 
     async def get_venue_list(self, sports_name):
         payload = {
@@ -279,7 +292,6 @@ class JSApi:
             raise
         except Exception as e:
             logger.debug("get_venue_list() 返回数据格式异常")
-            logger.debug(resp.text)
             logger.debug(e, exc_info=True)
             raise ApiResponseNotExpectedError("API response not as expected")
         return venue_list
@@ -297,7 +309,6 @@ class JSApi:
             raise
         except Exception as e:
             logger.debug("get_user_info() 返回数据格式异常")
-            logger.debug(resp.text)
             logger.debug(e, exc_info=True)
             raise ApiResponseNotExpectedError("API response not as expected")
 
@@ -325,7 +336,6 @@ class JSApi:
             raise
         except Exception as e:
             logger.debug("get_contact() 返回数据格式异常")
-            logger.debug(resp.text)
             logger.debug(e, exc_info=True)
             raise ApiResponseNotExpectedError("API response not as expected")
 
@@ -367,7 +377,6 @@ class JSApi:
 
         payload = {"ciphertext": self.get_cipher_text(payload)}
         payload_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-        logger.debug(f"payload_str after cipher: {payload_str}")
         url_book = self.js.call("type__1754", payload_str)
 
         try:
@@ -401,14 +410,12 @@ class JSApi:
                 raise
             except Exception as e:
                 logger.debug("post_book() 返回数据格式异常")
-                logger.debug(resp.text)
                 logger.debug(e, exc_info=True)
                 raise ApiResponseNotExpectedError("API response not as expected")
         try:
             resp_data = resp.json()
         except Exception as e:
             logger.debug("post_book() 返回数据格式异常")
-            logger.debug(resp.text)
             logger.debug(e, exc_info=True)
             raise ApiResponseNotExpectedError("API response not as expected")
 

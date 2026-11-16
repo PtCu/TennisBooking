@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -19,11 +20,16 @@ class GroundButton(Button):
     def __init__(self, variant="default", ground_info=None, *args, **kwargs):
         self.ground_info = ground_info
         self.selected = False
-        if ground_info["status"] == "0":
+        if str(ground_info["status"]) == "0":
             label = "已订"
         else:
             label = f"¥{ground_info['price']}"
         super().__init__(label, variant, *args, **kwargs)
+        try:
+            price = Decimal(str(ground_info["price"]))
+            self.disabled = not price.is_finite() or price < 0
+        except (ValueError, TypeError, InvalidOperation):
+            self.disabled = True
 
     @on(Button.Pressed)
     def ground_button_pressed(self):
@@ -54,7 +60,7 @@ class GroundSelectScreen(ModalScreen):
 
     def __init__(self, selected=(), *, name=None, id=None, classes=None):
         super().__init__(name=name, id=id, classes=classes)
-        self.selected_keys = {(str(item["groundId"]), str(item["startTime"]), str(item["endTime"])) for item in selected}
+        self.candidate_selection = {(str(item["groundId"]), str(item["startTime"]), str(item["endTime"])): dict(item) for item in selected}
         self.js_api: JSApi = self.app.js_api
 
     def timestamp_to_label(self, timestamp: int):
@@ -82,7 +88,13 @@ class GroundSelectScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="ground-select-container"):
-            with TabbedContent(id="ground-tabs"):
+            yield Label("正在查询官方开放日期…", id="ground-date-status")
+            initial = ""
+            if self.candidate_selection:
+                first_start = min(int(key[1]) for key in self.candidate_selection)
+                day = datetime.fromtimestamp(first_start / 1000).replace(hour=0, minute=0, second=0, microsecond=0)
+                initial = f"ground-tab-{int(day.timestamp() * 1000)}"
+            with TabbedContent(id="ground-tabs", initial=initial):
                 timestamps = self.js_api.get_timestamps_from_now()
                 for timestamp in timestamps:
                     tab_label = self.timestamp_to_label(timestamp)
@@ -96,21 +108,7 @@ class GroundSelectScreen(ModalScreen):
 
     @on(Button.Pressed, "#ground-confirm-button")
     def return_grounds_selected(self) -> None:
-        selected_grounds = []
-        for button in self.query(GroundButton):
-            if button.selected:
-                info = button.ground_info
-                selected_grounds.append(
-                    {
-                        "groundId": info["groundId"],
-                        "groundName": info["groundName"],
-                        "startTime": info["start_time"],
-                        "endTime": info["end_time"],
-                        "sportsType": info["sportsType"],
-                        "price": info["price"],
-                        "status": info["status"],
-                    }
-                )
+        selected_grounds = list(self.candidate_selection.values())
 
         if not selected_grounds:
             logger.warning("未选择任何场地")
@@ -122,11 +120,23 @@ class GroundSelectScreen(ModalScreen):
             logger.info("已更新候选范围，共 %s 段", len(selected_grounds))
         self.dismiss(selected_grounds)
 
+    @on(Button.Pressed, "GroundButton")
+    def remember_selection(self, event):
+        button = event.button
+        info = button.ground_info
+        key = (str(info["groundId"]), str(info["start_time"]), str(info["end_time"]))
+        if button.selected:
+            self.candidate_selection[key] = {"groundId": info["groundId"], "groundName": info["groundName"],
+                                    "startTime": info["start_time"], "endTime": info["end_time"],
+                                    "sportsType": info["sportsType"], "price": info["price"], "status": info["status"]}
+        else:
+            self.candidate_selection.pop(key, None)
+
     @on(Button.Pressed, "#ground-cancel-button")
     def cancel(self) -> None:
         self.dismiss(None)
 
-    @work
+    @work(exclusive=True, group="load-ground")
     @on(TabbedContent.TabActivated)
     async def show_grounds_info(self, event: TabbedContent.TabActivated) -> None:
         table: GroundTable = event.pane.query_one("GroundTable")
@@ -138,6 +148,13 @@ class GroundSelectScreen(ModalScreen):
         venue_select: Select = self.app.query_one("#ground-venue-select")
         venue_info = json.loads(venue_select.value)
         venue_id = venue_info["venue_id"]
+
+        try:
+            dates = await self.js_api.get_open_dates(venue_id)
+            opened = datetime.fromtimestamp(table.timestamp / 1000).date() in dates
+            self.query_one("#ground-date-status", Label).update("已开放预约" if opened else "尚未开放预约，以下场次为候选预览")
+        except Exception:
+            self.query_one("#ground-date-status", Label).update("暂时无法确认开放日期，请稍后重试")
 
         dt_starts, ground_dict = await self.get_ground_dict(venue_id, table.timestamp)
 
@@ -167,7 +184,7 @@ class GroundSelectScreen(ModalScreen):
                     ground_info=ground,
                 )
                 key = (str(ground["groundId"]), str(ground["start_time"]), str(ground["end_time"]))
-                button.selected = key in self.selected_keys
+                button.selected = key in self.candidate_selection
                 button.set_class(button.selected, "selected")
                 container = button_containers[dt_start][ground_name]
                 container.mount(button)

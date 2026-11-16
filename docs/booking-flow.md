@@ -1,6 +1,6 @@
 # 订场流程设计
 
-状态：讨论稿
+状态：久事单平台已接入，真实账号与付款验收进行中
 
 这份文档定义传统表单版订场体验。自然语言解析和 AI 入口放到后续适配层，底层 Request、Plan、库存和订单流程保持确定性。
 
@@ -162,17 +162,18 @@ Plan 3  备选方案
 
 ## 当前实现映射
 
-- `GroundSelectScreen` 负责读取官方场次并返回选中记录。
-- `GroundInfoPanel` 负责启动定时提交和展示状态。
-- `JSApi.post_book` 负责提交具体场次列表。
-- 后续改造应在选场结果和提交接口之间增加 Request、Plan、候选排序和 BookingSelection 层。
+- `SessionScreen` 和 `UserInfoPanel` 负责会话导入、只读验证和包场人选择。
+- `GroundSelectScreen` 负责读取官方场次、显示开放状态并保留候选勾选。
+- `booking_flow` 定义 `BookingRequest`、`Plan`、`CandidateSlot`，按方案顺序匹配库存与预算。
+- `GroundInfoPanel` 负责候选预览、确认、立即或定时执行和停止任务。
+- `orders.submit_selection` 负责提交前已有订单检查、库存复查、单次提交及唯一新订单核对。
+- `orders.track_payment` 负责官方付款状态、期限和提醒重试。
+- `OrdersScreen` 提供重启后继续核对与付款跟踪入口。
+- `phone_notify` 负责 Server酱设置、Windows 用户加密和微信提醒发送。
 
 ## 后续实现顺序
 
-1. 定义 Request、Plan、CandidateSlot 和 BookingSelection 的数据结构。
-2. 将现有选场结果改为候选条件和方案配置。
-3. 实现 `single_slot` 和 `contiguous_bundle`。
-4. 增加候选结果展示和方案优先级。
-5. 增加守候、二次核对和订单状态跟踪。
-6. 在验证官方接口后实现 `split_bundle` 和跨场地组合。
-7. 将自然语言解析作为独立输入适配器接入，不改变底层订场流程。
+1. 继续完善凭证获取体验并完成新会话真实登录验收。
+2. 使用本人明确选择的目标验收真实订单、手机付款及通知送达。
+3. 验证官方跨场地组合的接受范围。
+4. 久事流程稳定后再评估其他平台接入。

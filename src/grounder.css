@@ -126,7 +126,7 @@ GroundInfoPanel {
   #primary-plan-count,
   #fallback-one-count,
   #fallback-two-count {
-    width: 8;
+    width: 10;
   }
 
   #retry-label {

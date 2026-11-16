@@ -6,6 +6,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Button
 from NotificationScreen import NotificationScreen
+from OrdersScreen import OrdersScreen
 
 from AppLogPanel import AppLogHandler, AppLogPanel
 from GroundInfoPanel import GroundInfoPanel
@@ -39,6 +40,10 @@ class Grounder(App):
     def phone_settings(self):
         self.push_screen(NotificationScreen())
 
+    @on(Button.Pressed, "#orders-button")
+    def orders(self):
+        self.push_screen(OrdersScreen())
+
     async def on_ready(self) -> None:
         root_logger = logging.getLogger()
         log_widgt = self.query_one("#app-log")
@@ -47,11 +52,11 @@ class Grounder(App):
 
         self.js_api = JSApi()
 
-        user_info_panel = self.query_one(UserInfoPanel)
-        await user_info_panel.app_load_done()
-
         ground_info_panel = self.query_one(GroundInfoPanel)
         ground_info_panel.app_load_done()
+
+        user_info_panel = self.query_one(UserInfoPanel)
+        await user_info_panel.app_load_done()
 
     def on_unmount(self):
         handler = getattr(self, "ui_log_handler", None)
