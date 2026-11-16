@@ -12,7 +12,7 @@ from storage import DATA_DIR
 class NotificationScreen(ModalScreen):
     DEFAULT_CSS = """
     NotificationScreen { align: center middle; }
-    #phone-dialog { width: 78; height: auto; padding: 1 2; border: round $accent; background: $surface; }
+    #phone-dialog { width: 78; max-width: 95%; height: auto; max-height: 95%; overflow-y: auto; padding: 1 2; border: round $accent; background: $surface; }
     #phone-dialog Horizontal { height: auto; }
     #phone-dialog Input { margin: 1 0; }
     """

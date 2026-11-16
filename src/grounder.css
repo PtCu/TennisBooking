@@ -88,6 +88,12 @@ UserInfoPanel {
 
 GroundInfoPanel {
   Button { margin: 1 0; }
+  .field-label { width: 12; }
+  .field-row { align: left middle; }
+  .field-row > Label { margin-right: 1; }
+  #booking-actions { align: left middle; }
+  #booking-actions Button { margin-right: 2; }
+  Collapsible { padding: 0; margin: 0; height: auto; }
   #booking-mode { width: 18; }
   #candidate-hint {
     margin: 0 1;
@@ -111,7 +117,7 @@ GroundInfoPanel {
   }
 
   #ground-venue-select {
-    width: 35;
+    width: 1fr;
   }
   #ground-venue-label{
     padding: 0 0 0 5;
@@ -164,7 +170,7 @@ GroundSelectScreen {
     align: center middle;
 
     Button {
-      margin: 2 20;
+      margin: 1 2;
     }
   }
 

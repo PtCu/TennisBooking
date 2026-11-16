@@ -13,7 +13,7 @@
 
 ## 当前可运行版本 🪟
 
-仓库中的 Windows 单文件程序位于 [dist/Grounder.exe](dist/Grounder.exe)。双击即可启动，提交订场需要本机 Node.js 环境完成接口签名。
+仓库中的 Windows 单文件程序位于 [dist/Grounder.exe](dist/Grounder.exe)。双击即可启动，包内包含 Python 运行时和 Node.js 24.14.0。
 
 程序只读取本地保存的登录凭证和运行日志。程序不会修改 Windows 系统代理，不会安装证书，不会拦截微信流量，也不会请求管理员权限。
 
@@ -23,7 +23,7 @@
 
 ## 从源码运行和打包 🔧
 
-在仓库根目录执行以下命令安装依赖并运行源码：
+源码运行需要 Python 和 Node.js。在仓库根目录执行以下命令安装依赖并运行源码：
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -37,7 +37,9 @@ python -m pip install Nuitka
 powershell -ExecutionPolicy Bypass -File tools\build_release.ps1 -Python .venv\Scripts\python.exe
 ```
 
-打包完成后，发布文件会写入 `dist\Grounder.exe`。Nuitka 的临时构建目录不会作为发布文件使用。
+打包脚本会带上本机 Node.js 可执行文件和匹配的许可证。Node.js 24.14.0 的许可证已保存在 `tools/licenses`，其他版本可通过 `-NodeLicense` 指定。发布文件写入 `dist\Grounder.exe`。
+
+运行 `dist\Grounder.exe --check` 可检查包内 JavaScript 执行环境。
 
 ## 使用说明 🛠️
 
@@ -45,15 +47,15 @@ powershell -ExecutionPolicy Bypass -File tools\build_release.ps1 -Python .venv\S
 
 ### 1. 安装依赖 📦
 
-1. 请先安装依赖 [node.js](https://nodejs.org/zh-cn/download)
-2. 强烈建议使用 [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701?hl=zh-CN&gl=CN) 运行程序获得更好的视觉效果
-3. 在官方客户端完成久事登录后导出本人 HAR 或 JSON 会话文件。程序只通过“导入会话文件”读取 token
+1. 双击 `dist\Grounder.exe`，默认控制台和 Windows Terminal 均可使用
+2. 小窗口中可滚动查看表单，备选方案和查询设置可以展开
+3. 准备本人久事凭证或 HAR / JSON 会话文件，用登录弹窗验证账号
 
 ### 2. 登录 🔐
 
 <img align="center" src="src/assets/log_in.png">
 
-点击「登录 / 更新凭证」，在弹窗粘贴本人凭证，或填写 HAR / JSON 文件完整路径。程序验证账号后读取包场人，失败时保留已保存凭证。当前版本仍需要用户自行准备凭证文件，获取和更新会话的普通用户体验还在完善中。
+点击「登录 / 更新凭证」，在弹窗粘贴本人凭证，或点「选择会话文件」选择 HAR / JSON 文件。程序验证账号后读取包场人，失败时保留已保存凭证。当前版本仍需要用户自行准备凭证文件，获取和更新会话的普通用户体验还在完善中。
 
 > 注意, 在手机或者其他地方再次打开小程序会使 token 失效，需要重新登录
 
@@ -83,7 +85,7 @@ powershell -ExecutionPolicy Bypass -File tools\build_release.ps1 -Python .venv\S
 
 ### 当前验证范围
 
-20 项回归测试覆盖 HAR 来源筛选、旧配置读取、失败导入保留凭证、预算内候选、连续性、备选方案、未开放日期禁止提交、结果不明防重复、官方详情核对、付款状态及提醒去重。120×40 和 140×45 界面检查通过，包含候选切换日期保留勾选、方案数量和订单弹窗。本机旧会话已通过只读请求确认失效，真实新会话登录、真实订单付款及微信送达仍待验收。
+24 项回归测试覆盖 HAR 来源筛选、旧配置读取、失败导入保留凭证、预算内候选、大量不连续候选、连续性、备选方案、未开放日期禁止提交、结果不明防重复、官方详情核对、付款状态及提醒去重。80×25、120×40 和 140×45 界面检查通过，包含文件选择、候选切换日期保留勾选、方案数量和订单弹窗。本机旧会话已通过只读请求确认失效，真实新会话登录、真实订单付款及微信送达仍待验收。
 
 > 注意：
 > 1. 不要抢最后一天的场地，最后一天的场地是不开放预定的，显示已订的是场馆内定预留的

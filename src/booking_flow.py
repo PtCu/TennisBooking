@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
-from itertools import combinations
+from bisect import bisect_left
 
 
 PLAN_TYPES = {"single_slot", "contiguous_bundle", "split_bundle"}
@@ -158,6 +158,34 @@ def _select_contiguous(slots: list[CandidateSlot], count: int, maximum: Decimal)
     return ()
 
 
+def _select_split(slots: list[CandidateSlot], count: int, maximum: Decimal) -> tuple[CandidateSlot, ...]:
+    """Find the earliest affordable non-overlapping selection in O(count * slots)."""
+    starts = [int(slot.start_time) for slot in slots]
+    following = [bisect_left(starts, int(slot.end_time), lo=index + 1) for index, slot in enumerate(slots)]
+    infinity = Decimal("Infinity")
+    minimum = [[Decimal(0)] * (len(slots) + 1)]
+    for remaining in range(1, count + 1):
+        costs = [infinity] * (len(slots) + 1)
+        for index in range(len(slots) - 1, -1, -1):
+            costs[index] = min(costs[index + 1], slots[index].price + minimum[remaining - 1][following[index]])
+        minimum.append(costs)
+    if minimum[count][0] > maximum:
+        return ()
+    selected = []
+    index = 0
+    for remaining in range(count, 0, -1):
+        while index < len(slots):
+            slot = slots[index]
+            next_index = following[index]
+            if slot.price + minimum[remaining - 1][next_index] <= maximum:
+                selected.append(slot)
+                maximum -= slot.price
+                index = next_index
+                break
+            index += 1
+    return tuple(selected)
+
+
 def select_plan(
     request: BookingRequest,
     plan: Plan,
@@ -182,9 +210,7 @@ def select_plan(
     elif plan.kind == "contiguous_bundle":
         selected = _select_contiguous(slots, plan.count, request.max_total)
     else:
-        selected = next((group for group in combinations(slots, plan.count)
-                         if _within_budget(group, request.max_total)
-                         and all(left.end <= right.start for left, right in zip(group, group[1:]))), ())
+        selected = _select_split(slots, plan.count, Decimal(str(request.max_total)))
 
     if len(selected) != plan.count or not _within_budget(selected, request.max_total):
         return ()

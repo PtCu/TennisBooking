@@ -1,5 +1,7 @@
 param(
-    [string]$Python = ""
+    [string]$Python = "",
+    [string]$Node = "",
+    [string]$NodeLicense = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +32,26 @@ if (-not $Python -or -not (Test-Path -LiteralPath $Python)) {
     throw "Python was not found. Use -Python to specify the interpreter path."
 }
 
+if (-not $Node) {
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCommand) { $Node = $nodeCommand.Source }
+}
+if (-not $Node -or -not (Test-Path -LiteralPath $Node)) {
+    throw "Node.js was not found. Use -Node to specify the executable."
+}
+if (-not $NodeLicense) {
+    $installedLicense = Join-Path (Split-Path $Node) "LICENSE"
+    if (Test-Path -LiteralPath $installedLicense) {
+        $NodeLicense = $installedLicense
+    }
+    elseif ((& $Node --version) -eq "v24.14.0") {
+        $NodeLicense = Join-Path $root "tools\licenses\node-24.14.0.txt"
+    }
+}
+if (-not $NodeLicense -or -not (Test-Path -LiteralPath $NodeLicense)) {
+    throw "Supply the matching Node.js license with -NodeLicense."
+}
+
 & $Python -m nuitka --version
 if ($LASTEXITCODE -ne 0) {
     throw "Nuitka is not installed in the selected Python environment."
@@ -37,7 +59,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Push-Location $root
 try {
-    & $Python -m nuitka --output-dir=dist --assume-yes-for-downloads src\__main__.py
+    & $Python -m nuitka --output-dir=dist --assume-yes-for-downloads "--include-data-files=$Node=runtime/node.exe" "--include-data-files=$NodeLicense=runtime/Node-LICENSE.txt" src\__main__.py
     if ($LASTEXITCODE -ne 0) {
         throw "Nuitka build failed."
     }

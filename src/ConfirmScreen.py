@@ -7,7 +7,7 @@ from textual.widgets import Button, Label
 class ConfirmScreen(ModalScreen[bool]):
     DEFAULT_CSS = """
     ConfirmScreen { align: center middle; }
-    #confirm-dialog { width: 80; height: auto; padding: 1 2; border: round $accent; background: $surface; }
+    #confirm-dialog { width: 80; max-width: 95%; height: auto; max-height: 95%; overflow-y: auto; padding: 1 2; border: round $accent; background: $surface; }
     #confirm-dialog Horizontal { height: auto; }
     """
 

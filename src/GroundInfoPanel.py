@@ -7,9 +7,9 @@ from decimal import Decimal, InvalidOperation
 
 from textual import on, work
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Middle, ScrollableContainer
+from textual.containers import Horizontal, ScrollableContainer
 from textual.message import Message
-from textual.widgets import Button, Label, Select, Input
+from textual.widgets import Button, Label, Select, Input, Collapsible
 
 from GroundSelectScreen import GroundSelectScreen
 from JSApi import JSApi, TokenExpiredError
@@ -74,59 +74,56 @@ class GroundInfoPanel(ScrollableContainer):
 
     def compose(self) -> ComposeResult:
         self.border_title = "场馆预定"
-        with Horizontal():
-            yield Middle(Label("[b]选择运动：[/]", id="ground-sports-label"))
-            yield Middle(
-                Select(
-                    [("羽毛球", "羽毛球"), ("网球", "网球")],
-                    prompt="请选择运动项目",
-                    id="ground-sports-select",
-                )
-            )
-            yield Middle(Label("[b]选择场馆：[/]", id="ground-venue-label"))
-            yield Middle(Select([], prompt="请选择场馆", id="ground-venue-select"))
-            yield Middle(Button("选择候选场次", id="ground-button"))
+        with Horizontal(classes="field-row"):
+            yield Label("运动", classes="field-label")
+            yield Select([("网球", "网球"), ("羽毛球", "羽毛球")], prompt="选择运动", id="ground-sports-select")
+        with Horizontal(classes="field-row"):
+            yield Label("场馆", classes="field-label")
+            yield Select([], prompt="选择场馆", id="ground-venue-select")
+            yield Button("选择候选场次", id="ground-button")
 
-        yield Label("已选场次会作为候选范围，开抢时程序会重新查询库存。", id="candidate-hint")
+        yield Label("多选表示可接受范围，按方案匹配其中的场次。", id="candidate-hint")
         yield Label("尚未选择候选场次", id="candidate-summary")
-
         with Horizontal(classes="plan-row"):
-            yield Middle(Label("主方案"))
-            yield Middle(Select(PLAN_OPTIONS, value="contiguous_bundle", id="primary-plan-type"))
-            yield Middle(Select(PLAN_COUNT_OPTIONS, value="2", id="primary-plan-count"))
-
-        with Horizontal(classes="plan-row"):
-            yield Middle(Label("备选方案1"))
-            yield Middle(Select(FALLBACK_OPTIONS, value="disabled", id="fallback-one-type"))
-            yield Middle(Select(PLAN_COUNT_OPTIONS, value="1", id="fallback-one-count"))
-
-        with Horizontal(classes="plan-row"):
-            yield Middle(Label("备选方案2"))
-            yield Middle(Select(FALLBACK_OPTIONS, value="disabled", id="fallback-two-type"))
-            yield Middle(Select(PLAN_COUNT_OPTIONS, value="1", id="fallback-two-count"))
-
-        with Horizontal():
-            yield Middle(Select([("立即开始", "now"), ("今天定时", "timed")], value="now", id="booking-mode"))
-            yield Middle(Label("总预算/元"))
-            yield Middle(Input(value="450", type="number", id="booking-budget"))
-            yield Middle(Label("开抢时间"))
-            yield Middle(TimeSelect(id="time-select"))
-            yield Middle(Button("开始预定", id="order-button"))
-            yield Middle(Button("查询候选", id="preview-button"))
-            yield Middle(Button("停止", id="stop-button"))
-
-        with Horizontal():
-            yield Middle(Label("查询次数"), id="retry-label")
-            yield Middle(Input(value="10", type="integer", id="retry-input"))
-            yield Middle(Label("查询间隔"), id="delay-label")
-            yield Middle(Input(value="2000", type="integer", id="delay-input"))
-            yield Middle(Label("毫秒"), id="delay-unit-label")
-            yield Middle(Label("随机偏差"), id="jitter-label")
-            yield Middle(Input(value="10", type="integer", id="jitter-input"))
-            yield Middle(Label("%"), id="jitter-unit-label")
+            yield Label("主方案")
+            yield Select(PLAN_OPTIONS, value="contiguous_bundle", id="primary-plan-type")
+            yield Select(PLAN_COUNT_OPTIONS, value="2", id="primary-plan-count")
+        with Collapsible(title="备选方案", collapsed=True):
+            with Horizontal(classes="plan-row"):
+                yield Label("备选方案1")
+                yield Select(FALLBACK_OPTIONS, value="disabled", id="fallback-one-type")
+                yield Select(PLAN_COUNT_OPTIONS, value="1", id="fallback-one-count")
+            with Horizontal(classes="plan-row"):
+                yield Label("备选方案2")
+                yield Select(FALLBACK_OPTIONS, value="disabled", id="fallback-two-type")
+                yield Select(PLAN_COUNT_OPTIONS, value="1", id="fallback-two-count")
+        with Horizontal(classes="field-row"):
+            yield Label("总预算/元", classes="field-label")
+            yield Input(value="450", type="number", id="booking-budget")
+            yield Select([("立即开始", "now"), ("今天定时", "timed")], value="now", id="booking-mode")
+        with Horizontal(classes="field-row", id="timing-row"):
+            yield Label("开抢时间", classes="field-label")
+            yield TimeSelect(id="time-select")
+        with Collapsible(title="查询设置", collapsed=True):
+            with Horizontal(classes="field-row"):
+                yield Label("查询次数", classes="field-label")
+                yield Input(value="10", type="integer", id="retry-input")
+                yield Label("间隔/毫秒")
+                yield Input(value="2000", type="integer", id="delay-input")
+            with Horizontal(classes="field-row"):
+                yield Label("随机偏差/%", classes="field-label")
+                yield Input(value="10", type="integer", id="jitter-input")
+        with Horizontal(id="booking-actions"):
+            yield Button("查询候选", id="preview-button")
+            yield Button("开始预定", id="order-button", variant="primary")
+            yield Button("停止", id="stop-button")
 
     def app_load_done(self) -> None:
         self.js_api: JSApi = self.app.js_api
+
+    @on(Select.Changed, "#booking-mode")
+    def update_booking_mode(self, event):
+        self.query_one("#timing-row").display = event.value == "timed"
 
     @on(Select.Changed, "#primary-plan-type")
     @on(Select.Changed, "#fallback-one-type")

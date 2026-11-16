@@ -10,7 +10,7 @@
 # nuitka-project: --output-filename=Grounder.exe
 # nuitka-project: --company-name=https://github.com/XIGUAjuice
 # nuitka-project: --product-name=Grounder
-# nuitka-project: --product-version=1.2.0
+# nuitka-project: --product-version=1.3.0
 # nuitka-project: --copyright=https://github.com/XIGUAjuice
 # %%
 import logging
@@ -18,6 +18,10 @@ import sys
 import asyncio
 from datetime import datetime
 from pathlib import Path
+from runtime_env import configure_runtime
+
+configure_runtime()
+
 from app import Grounder
 from storage import DATA_DIR
 
@@ -40,6 +44,16 @@ def config_logger():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--check"]:
+        import execjs
+        import json
+        try:
+            ready = execjs.eval("1 + 1") == 2
+            print(json.dumps({"ready": ready, "javascript": execjs.get().name}))
+            sys.exit(0 if ready else 1)
+        except Exception:
+            print(json.dumps({"ready": False, "error": "JavaScript runtime unavailable"}))
+            sys.exit(1)
     app = None
     try:
         config_logger()

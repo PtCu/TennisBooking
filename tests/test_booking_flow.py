@@ -39,3 +39,16 @@ class BookingFlowTests(unittest.TestCase):
     def test_split_does_not_book_overlapping_courts(self):
         result = self.choose([slot("A", 0, "100"), slot("B", 0, "100")], [Plan("split_bundle", 2)], "300")
         self.assertIsNone(result)
+
+    def test_split_skips_expensive_early_slot_but_keeps_time_priority(self):
+        slots = [slot("A", 0, "250"), slot("B", 0, "100"), slot("A", 1, "100"), slot("B", 2, "100")]
+        result = self.choose(slots, [Plan("split_bundle", 2)], "200")
+        self.assertEqual([item.ground_id for item in result[1]], ["B", "A"])
+
+    def test_large_split_range_with_insufficient_budget_returns_promptly(self):
+        import time
+        slots = [slot(str(court), hour, "100") for hour in range(8) for court in range(30)]
+        started = time.monotonic()
+        result = self.choose(slots, [Plan("split_bundle", 4)], "300")
+        self.assertIsNone(result)
+        self.assertLess(time.monotonic() - started, 2)

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class OrdersScreen(ModalScreen):
     DEFAULT_CSS = """
     OrdersScreen { align: center middle; }
-    #orders-dialog { width: 90; height: auto; max-height: 90%; padding: 1 2; border: round $accent; background: $surface; }
+    #orders-dialog { width: 90; max-width: 95%; height: auto; max-height: 90%; overflow-y: auto; padding: 1 2; border: round $accent; background: $surface; }
     #orders-dialog Horizontal { height: auto; }
     #order-state { height: auto; margin: 1 0; }
     """
