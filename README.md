@@ -39,7 +39,7 @@ powershell -ExecutionPolicy Bypass -File tools\build_release.ps1 -Python .venv\S
 
 ## 使用说明 🛠️
 
-订场流程设计见 [docs/booking-flow.md](docs/booking-flow.md)。
+订场流程设计见 [docs/booking-flow.md](docs/booking-flow.md)，久事第一阶段流程见 [docs/jiushi-first-flow.md](docs/jiushi-first-flow.md)。后续只在本仓库维护，AutoOrder 不再作为开发入口。
 
 ### 1. 安装依赖 📦
 
