@@ -52,8 +52,9 @@ class GroundSelectScreen(ModalScreen):
         def control(self) -> "GroundSelectScreen":
             return self.sender
 
-    def __init__(self, *children, name=None, id=None, classes=None):
-        super().__init__(*children, name=name, id=id, classes=classes)
+    def __init__(self, selected=(), *, name=None, id=None, classes=None):
+        super().__init__(name=name, id=id, classes=classes)
+        self.selected_keys = {(str(item["groundId"]), str(item["startTime"]), str(item["endTime"])) for item in selected}
         self.js_api: JSApi = self.app.js_api
 
     def timestamp_to_label(self, timestamp: int):
@@ -114,7 +115,11 @@ class GroundSelectScreen(ModalScreen):
         if not selected_grounds:
             logger.warning("未选择任何场地")
         else:
-            logger.error(f"已选择场地: {selected_grounds}")
+            dates = {datetime.fromtimestamp(int(item["startTime"]) / 1000).date() for item in selected_grounds}
+            if len(dates) > 1:
+                self.app.notify("一次任务请选择同一天的候选场次", severity="warning")
+                return
+            logger.info("已更新候选范围，共 %s 段", len(selected_grounds))
         self.dismiss(selected_grounds)
 
     @on(Button.Pressed, "#ground-cancel-button")
@@ -125,10 +130,10 @@ class GroundSelectScreen(ModalScreen):
     @on(TabbedContent.TabActivated)
     async def show_grounds_info(self, event: TabbedContent.TabActivated) -> None:
         table: GroundTable = event.pane.query_one("GroundTable")
-        table.remove_children()
+        await table.remove_children()
 
         time_container: Vertical = event.pane.query_one("#ground-time-container")
-        time_container.remove_children()
+        await time_container.remove_children()
 
         venue_select: Select = self.app.query_one("#ground-venue-select")
         venue_info = json.loads(venue_select.value)
@@ -161,6 +166,9 @@ class GroundSelectScreen(ModalScreen):
                 button = GroundButton(
                     ground_info=ground,
                 )
+                key = (str(ground["groundId"]), str(ground["start_time"]), str(ground["end_time"]))
+                button.selected = key in self.selected_keys
+                button.set_class(button.selected, "selected")
                 container = button_containers[dt_start][ground_name]
                 container.mount(button)
 

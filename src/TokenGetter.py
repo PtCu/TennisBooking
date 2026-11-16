@@ -1,90 +1,81 @@
-# %%
 import json
-import logging
 from pathlib import Path
+from urllib.parse import urlsplit
 
-logger = logging.getLogger(__name__)
+from storage import DATA_DIR, write_json
+
+
+def validate_token(token):
+    if not isinstance(token, str) or not token.strip() or len(token) > 16384:
+        raise ValueError("请填写有效的登录凭证")
+    if any(character.isspace() or ord(character) < 32 for character in token):
+        raise ValueError("登录凭证含有空白或控制字符")
+    return token
 
 
 class TokenGetter:
-    """Read and clear a token stored in the local application config.
-
-    Login capture is intentionally not implemented here. This class must not
-    change Windows proxy settings, install certificates, intercept traffic, or
-    request administrator privileges.
-    """
-
-    def __init__(self):
-        self.assets_path = Path(__file__).parent / "assets"
+    def __init__(self, config_path=None):
+        self.config_path = Path(config_path) if config_path else DATA_DIR / "config.json"
+        self.legacy_path = Path(__file__).parent / "assets" / "config.json"
 
     def get_token(self):
-        logger.error("未检测到本地登录凭证，请先导入本人会话文件")
         return False
 
-    def import_token_file(self, path: str | Path):
+    @staticmethod
+    def token_from_file(path):
         source = Path(path)
-        data = json.loads(source.read_text(encoding="utf-8-sig"))
-        token = data.get("token") if isinstance(data, dict) else None
-        if not token and isinstance(data, dict) and isinstance(data.get("log"), dict):
-            for entry in data["log"].get("entries", []):
-                request = entry.get("request", {}) if isinstance(entry, dict) else {}
-                headers = request.get("headers", []) if isinstance(request, dict) else []
-                for header in headers:
-                    if str(header.get("name", "")).lower() == "token" and header.get("value"):
-                        token = header["value"]
-        if not token:
-            raise ValueError("文件中没有找到本人久事 token")
-        config_path = self.assets_path / "config.json"
-        config = {}
-        if config_path.exists() and config_path.stat().st_size:
-            try:
-                config = json.loads(config_path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                config = {}
-        config["token"] = token
-        config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+        if source.stat().st_size > 100_000_000:
+            raise ValueError("会话文件过大，请只导出久事请求")
+        try:
+            data = json.loads(source.read_text(encoding="utf-8-sig"))
+        except (ValueError, UnicodeError):
+            raise ValueError("请选择有效的 HAR 或 JSON 文件") from None
+        if not isinstance(data, dict):
+            raise ValueError("会话文件格式无效")
+        if "token" in data:
+            return validate_token(data["token"])
+        if data.get("host") == "jsapp.jussyun.com" and isinstance(data.get("headers"), dict):
+            return validate_token(data["headers"].get("token"))
+        log = data.get("log", {})
+        entries = log.get("entries", []) if isinstance(log, dict) else []
+        token = None
+        for entry in entries if isinstance(entries, list) else []:
+            request = entry.get("request", {}) if isinstance(entry, dict) else {}
+            if not isinstance(request, dict):
+                continue
+            url = urlsplit(request.get("url", ""))
+            if (url.scheme != "https" or url.hostname != "jsapp.jussyun.com"
+                    or url.port not in (None, 443) or not url.path.startswith("/jiushi-core/")):
+                continue
+            for header in request.get("headers", []):
+                if isinstance(header, dict) and str(header.get("name", "")).lower() == "token":
+                    token = validate_token(header.get("value"))
+        if token is None:
+            raise ValueError("文件中没有久事登录凭证，请选择本人登录后的久事请求")
         return token
 
+    def _read_config(self):
+        path = self.config_path if self.config_path.exists() else self.legacy_path
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (ValueError, UnicodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def save_token(self, token):
+        config = self._read_config()
+        config["token"] = validate_token(token)
+        write_json(self.config_path, config)
+
     def read_token(self):
-        config_path = self.assets_path / "config.json"
-        if not config_path.exists():
-            config_path.touch()
-            logger.error("配置文件不存在，请准备本地 token")
+        try:
+            return validate_token(self._read_config().get("token"))
+        except ValueError:
             return None
 
-        with config_path.open("r+", encoding="utf-8") as config_file:
-            try:
-                data: dict = json.load(config_file)
-            except json.JSONDecodeError:
-                logger.error("配置文件格式错误，初始化配置文件")
-                data = {}
-                config_file.truncate(0)
-                config_file.seek(0)
-                json.dump(data, config_file)
-                return None
-
-            token = data.get("token", {})
-            if token == {}:
-                logger.error("配置文件中不存在 token，请准备本地 token")
-                return None
-            logger.debug("读取 token: %s", token)
-            return token
-
     def clear_token(self):
-        config_path = self.assets_path / "config.json"
-        if not config_path.exists():
-            logger.error("配置文件不存在")
-            return
-
-        logger.error("清除 token")
-        with config_path.open("r+", encoding="utf-8") as config_file:
-            try:
-                json_dict = json.load(config_file)
-            except json.JSONDecodeError:
-                logger.error("配置文件格式错误，初始化配置文件")
-                json_dict = {}
-
-            json_dict.pop("token", None)
-            config_file.truncate(0)
-            config_file.seek(0)
-            json.dump(json_dict, config_file)
+        config = self._read_config()
+        config.pop("token", None)
+        write_json(self.config_path, config)

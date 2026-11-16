@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
+from itertools import combinations
 
 
 PLAN_TYPES = {"single_slot", "contiguous_bundle", "split_bundle"}
@@ -128,7 +129,7 @@ def flatten_ground_infos(ground_infos: Iterable[dict]) -> tuple[CandidateSlot, .
                     end_time=end_time,
                     sports_type=str(ground["sportsType"]),
                     price=price,
-                    available=str(ground.get("status")) == "1" and price >= 0,
+                    available=price.is_finite() and str(ground.get("status")) == "1" and price >= 0,
                 )
             )
     return tuple(result)
@@ -142,7 +143,7 @@ def _within_budget(slots: Iterable[CandidateSlot], maximum: Decimal) -> bool:
     return sum((slot.price for slot in slots), Decimal(0)) <= Decimal(str(maximum))
 
 
-def _select_contiguous(slots: list[CandidateSlot], count: int) -> tuple[CandidateSlot, ...]:
+def _select_contiguous(slots: list[CandidateSlot], count: int, maximum: Decimal) -> tuple[CandidateSlot, ...]:
     by_ground: dict[str, list[CandidateSlot]] = {}
     for slot in slots:
         by_ground.setdefault(slot.ground_id, []).append(slot)
@@ -152,7 +153,7 @@ def _select_contiguous(slots: list[CandidateSlot], count: int) -> tuple[Candidat
         group.sort(key=_sort_key)
         for start in range(0, len(group) - count + 1):
             window = group[start : start + count]
-            if all(left.end == right.start for left, right in zip(window, window[1:])):
+            if all(left.end == right.start for left, right in zip(window, window[1:])) and _within_budget(window, maximum):
                 return tuple(window)
     return ()
 
@@ -177,11 +178,13 @@ def select_plan(
     )
 
     if plan.kind == "single_slot":
-        selected = tuple(slots[:1])
+        selected = next(((slot,) for slot in slots if _within_budget((slot,), request.max_total)), ())
     elif plan.kind == "contiguous_bundle":
-        selected = _select_contiguous(slots, plan.count)
+        selected = _select_contiguous(slots, plan.count, request.max_total)
     else:
-        selected = tuple(slots[: plan.count])
+        selected = next((group for group in combinations(slots, plan.count)
+                         if _within_budget(group, request.max_total)
+                         and all(left.end <= right.start for left, right in zip(group, group[1:]))), ())
 
     if len(selected) != plan.count or not _within_budget(selected, request.max_total):
         return ()

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import hashlib
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -11,7 +12,10 @@ from textual.message import Message
 from textual.widgets import Button, Label, Select, Input
 
 from GroundSelectScreen import GroundSelectScreen
-from JSApi import JSApi, TokenExpiredError, retry
+from JSApi import JSApi, TokenExpiredError
+from ConfirmScreen import ConfirmScreen
+from phone_notify import optional_notifier, NotificationError
+from storage import DATA_DIR, write_json
 from booking_flow import (
     BookingRequest,
     Plan,
@@ -102,17 +106,20 @@ class GroundInfoPanel(ScrollableContainer):
             yield Middle(Select(PLAN_COUNT_OPTIONS, value="1", id="fallback-two-count"))
 
         with Horizontal():
+            yield Middle(Select([("立即开始", "now"), ("今天定时", "timed")], value="now", id="booking-mode"))
             yield Middle(Label("总预算/元"))
             yield Middle(Input(value="450", type="number", id="booking-budget"))
             yield Middle(Label("开抢时间"))
             yield Middle(TimeSelect(id="time-select"))
             yield Middle(Button("开始预定", id="order-button"))
+            yield Middle(Button("查询候选", id="preview-button"))
+            yield Middle(Button("停止", id="stop-button"))
 
         with Horizontal():
-            yield Middle(Label("重试次数"), id="retry-label")
+            yield Middle(Label("查询次数"), id="retry-label")
             yield Middle(Input(value="10", type="integer", id="retry-input"))
-            yield Middle(Label("重试间隔"), id="delay-label")
-            yield Middle(Input(value="200", type="integer", id="delay-input"))
+            yield Middle(Label("查询间隔"), id="delay-label")
+            yield Middle(Input(value="2000", type="integer", id="delay-input"))
             yield Middle(Label("毫秒"), id="delay-unit-label")
             yield Middle(Label("随机偏差"), id="jitter-label")
             yield Middle(Input(value="10", type="integer", id="jitter-input"))
@@ -121,10 +128,30 @@ class GroundInfoPanel(ScrollableContainer):
     def app_load_done(self) -> None:
         self.js_api: JSApi = self.app.js_api
 
+    @on(Button.Pressed, "#stop-button")
+    def stop_booking(self):
+        self.workers.cancel_group(self, "booking")
+        logger.info("任务已停止，请在官方订单中核对已提交的结果")
+
+    @on(Button.Pressed, "#preview-button")
+    @work(exclusive=True, group="preview")
+    async def preview(self):
+        try:
+            request = self._build_request()
+            venue = json.loads(self.query_one("#ground-venue-select", Select).value)
+            inventory = await self.js_api.get_ground(venue["venue_id"], self._day_timestamp(request))
+            chosen = choose_plan(request, flatten_ground_infos(inventory))
+            logger.info(selection_summary(*chosen) if chosen else "当前库存没有符合方案和预算的场次")
+        except Exception:
+            logger.error("查询失败，请先登录并选择场馆、候选场次和方案")
+
     @work
     @on(Button.Pressed, "#ground-button")
     async def show_ground_select_screen(self):
-        selected = await self.app.push_screen_wait(GroundSelectScreen())
+        if self.query_one("#ground-venue-select", Select).value is Select.BLANK:
+            logger.error("请先选择场馆")
+            return
+        selected = await self.app.push_screen_wait(GroundSelectScreen(self.grounds_selected))
         if selected is not None:
             self.grounds_selected = selected
             self._update_candidate_summary()
@@ -134,8 +161,11 @@ class GroundInfoPanel(ScrollableContainer):
         if not self.grounds_selected:
             summary.update("尚未选择候选场次")
             return
-        courts = sorted({str(item["groundName"]) for item in self.grounds_selected})
-        summary.update(f"候选范围：{'、'.join(courts)}，共 {len(self.grounds_selected)} 段")
+        summary.update("候选范围\n" + "、".join(
+            f"{item['groundName']} {datetime.fromtimestamp(int(item['startTime']) / 1000):%m-%d %H:%M}"
+            f"–{datetime.fromtimestamp(int(item['endTime']) / 1000):%H:%M}"
+            for item in self.grounds_selected
+        ))
 
     def _read_plan(self, prefix: str, name: str, *, optional: bool) -> Plan | None:
         kind = self.query_one(f"#{prefix}-type", Select).value
@@ -179,26 +209,34 @@ class GroundInfoPanel(ScrollableContainer):
         jitter_percent: int,
     ) -> bool:
         timestamp = self._day_timestamp(request)
-        for plan in request.plans:
-            logger.error("正在检查%s", plan.name or plan.kind)
+        for attempt in range(max_retries):
+            open_dates = await self.js_api.get_open_dates(venue_info["venue_id"])
+            if datetime.fromtimestamp(timestamp / 1000).date() not in open_dates:
+                logger.info("目标日期尚未开放预约，继续等待")
+                if attempt + 1 < max_retries:
+                    await asyncio.sleep(delay / 1000)
+                continue
             ground_infos = await self.js_api.get_ground(venue_info["venue_id"], timestamp)
             available_slots = flatten_ground_infos(ground_infos)
-            chosen = choose_plan(
-                BookingRequest(request.candidate_slots, (plan,), request.max_total),
-                available_slots,
-            )
+            chosen = choose_plan(request, available_slots)
             if chosen is None:
-                logger.error("%s没有匹配的实时库存", plan.name or plan.kind)
+                logger.info("第 %s 次查询，尚无匹配库存", attempt + 1)
+                if attempt + 1 < max_retries:
+                    await asyncio.sleep(delay / 1000)
                 continue
 
             selected_plan, selected_slots = chosen
             logger.error(selection_summary(selected_plan, selected_slots))
-            book_with_retry = retry(
-                max_retries=max_retries,
-                delay=delay,
-                jitter_percent=jitter_percent,
-            )(self.js_api.post_book)
-            success = await book_with_retry(
+            fingerprint = hashlib.sha256(json.dumps([str(venue_info["venue_id"]), str(contact_id), request.candidate_slots], sort_keys=True).encode()).hexdigest()
+            record_path = DATA_DIR / "orders" / f"{fingerprint}.json"
+            record_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with record_path.open("x", encoding="utf-8") as output:
+                    json.dump({"state": "submitting", "summary": selection_summary(selected_plan, selected_slots)}, output, ensure_ascii=False)
+            except FileExistsError:
+                logger.error("此任务已有提交记录，请先核对久事官方订单。记录位于 %s", record_path)
+                return False
+            success = await self.js_api.post_book(
                 contact_id=contact_id,
                 venue_id=venue_info["venue_id"],
                 venue_name=venue_info["venue_name"],
@@ -208,12 +246,21 @@ class GroundInfoPanel(ScrollableContainer):
                 ground_list=[slot.to_payload() for slot in selected_slots],
             )
             if success is True:
-                logger.error("%s提交成功，请前往小程序付款", plan.name or plan.kind)
+                write_json(record_path, {"state": "submitted", "summary": selection_summary(selected_plan, selected_slots)})
+                logger.info("提交成功，请到久事体育 → 我的订单核对并付款")
+                try:
+                    notifier = optional_notifier(DATA_DIR)
+                    if notifier:
+                        await asyncio.to_thread(notifier.send, "久事订场提交成功 · 请核对付款", "订场接口返回成功。请使用下单账号打开久事体育 → 我的订单 → 待支付，核对日期、场次、金额和官方付款期限后付款。")
+                        logger.info("微信提醒服务已接受消息")
+                except (NotificationError, OSError):
+                    logger.error("微信提醒发送失败，请直接打开久事订单核对付款")
                 return True
-            logger.error("%s提交未成功，继续尝试下一方案", plan.name or plan.kind)
+            logger.error("未确认订单成功，请先核对久事官方订单")
+            return False
         return False
 
-    @work(thread=True)
+    @work(exclusive=True, group="booking")
     @on(Button.Pressed, "#order-button")
     async def send_order(self):
         hour_select: Select = self.query_one("#hour-select")
@@ -231,6 +278,8 @@ class GroundInfoPanel(ScrollableContainer):
             max_retries = int(retry_input.value)
             delay = int(delay_input.value)
             jitter_percent = int(jitter_input.value)
+            if not 1 <= max_retries <= 300 or delay < 2000:
+                raise ValueError("查询次数或间隔无效")
         except (ValueError, TypeError, json.JSONDecodeError):
             logger.error("订场条件无效，请检查候选场次、方案和预算")
             return
@@ -241,7 +290,7 @@ class GroundInfoPanel(ScrollableContainer):
             return
 
         now = datetime.now()
-        target_time = now.replace(
+        target_time = now if self.query_one("#booking-mode", Select).value == "now" else now.replace(
             hour=int(hour_select.value),
             minute=int(minute_select.value),
             second=int(second_select.value),
@@ -251,7 +300,17 @@ class GroundInfoPanel(ScrollableContainer):
             logger.error("预定时间无法早于当前时间")
             return
 
-        wait_seconds = (target_time - now).total_seconds()
+        confirmed = await self.app.push_screen_wait(ConfirmScreen(
+            f"{venue_info['agency_name']} · {venue_info['venue_name']}\n"
+            f"候选 {len(request.candidate_slots)} 段，总预算 {request.max_total} 元\n"
+            + " → ".join(f"{plan.name} {dict((value, label) for label, value in PLAN_OPTIONS)[plan.kind]} {plan.count}段" for plan in request.plans)
+            + "\n" + "、".join(f"{item['groundName']} {datetime.fromtimestamp(int(item['startTime']) / 1000):%m-%d %H:%M}–{datetime.fromtimestamp(int(item['endTime']) / 1000):%H:%M}" for item in self.grounds_selected)
+            + f"\n开始时间 {target_time:%H:%M:%S}"
+        ))
+        if not confirmed:
+            return
+
+        wait_seconds = max(0, (target_time - datetime.now()).total_seconds())
         logger.error(
             f"将在 {target_time:%H:%M:%S} 开始检查，距离预定时间还有 {wait_seconds:.3f} 秒"
         )
@@ -299,7 +358,7 @@ class GroundInfoPanel(ScrollableContainer):
                     "venue_name": venue["venueName"],
                     "sports_name": sports_name,
                 }
-                venue_list.append((venue["agencyName"], json.dumps(venue_dict)))
+                venue_list.append((f"{venue['agencyName']} · {venue['venueName']}", json.dumps(venue_dict)))
 
             venue_select: Select = self.query_one("#ground-venue-select")
             venue_select.set_options(venue_list)

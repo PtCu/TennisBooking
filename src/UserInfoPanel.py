@@ -1,142 +1,86 @@
-# %%
 import logging
 
 from textual import on, work
-from textual.app import ComposeResult
-from textual.containers import Horizontal, Middle, ScrollableContainer
+from textual.containers import Horizontal, ScrollableContainer
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Button, Label, Select
 
 from JSApi import JSApi, TokenExpiredError
+from SessionScreen import SessionScreen
 
 logger = logging.getLogger(__name__)
 
 
 class UserInfoPanel(ScrollableContainer):
-    LOG_IN: str = "✅ 已登录"
-    LOG_OUT: str = "❌ 未登录"
     logged_status = reactive(False)
 
     class LoggedStatusChanged(Message):
-        def __init__(self, sender: "UserInfoPanel", logged_status: bool) -> None:
+        def __init__(self, sender, logged_status):
             self.sender = sender
             self.logged_status = logged_status
             super().__init__()
-        
+
         @property
-        def control(self) -> "UserInfoPanel":
+        def control(self):
             return self.sender
 
-    def __init__(
-        self,
-        *children,
-        name=None,
-        id=None,
-        classes=None,
-        disabled=False,
-        can_focus=None,
-        can_focus_children=None,
-        can_maximize=None,
-    ):
-        super().__init__(
-            *children,
-            name=name,
-            id=id,
-            classes=classes,
-            disabled=disabled,
-            can_focus=can_focus,
-            can_focus_children=can_focus_children,
-            can_maximize=can_maximize,
-        )
-
-    def compose(self) -> ComposeResult:
-        self.border_title = "用户信息"
+    def compose(self):
+        self.border_title = "久事账号"
         with Horizontal():
-            yield Middle(Label("[b]状态：[/]", id="user-status-label"))
-            yield Middle(Label(self.LOG_OUT, id="user-status-icon-label"))
-            yield Middle(Button("登录", id="user-login-button"))
-            yield Middle(Label("[b]用户ID：[/] ", id="user-id-label"))
-            yield Middle(Label("", id="user-id-num-label"))
-            yield Middle(Button("导入会话文件", id="user-import-button"))
+            yield Label("未登录", id="user-status-icon-label")
+            yield Label("", id="user-id-num-label")
+            yield Button("登录 / 更新凭证", id="user-login-button")
         with Horizontal():
-            yield Middle(Label("[b]包场人信息：[/]", id="user-contact-label"))
-            yield Middle(Select([], prompt="请选择包场人", id="user-contact-select"))
+            yield Label("包场人")
+            yield Select([], prompt="登录后选择包场人", id="user-contact-select")
 
-    async def app_load_done(self) -> None:
-        self.js_api: JSApi = self.app.js_api
-        self.login()
+    async def app_load_done(self):
+        self.js_api = self.app.js_api
+        token = self.js_api.token_getter.read_token()
+        if token:
+            await self.verify_session(token, save=False)
 
-    def watch_logged_status(self, logged_status: bool) -> None:
-        status_icon: Label = self.query_one("#user-status-icon-label")
-
-        if logged_status is True:
-            status_icon.update(self.LOG_IN)
-        else:
-            status_icon.update(self.LOG_OUT)
+    def watch_logged_status(self, logged_status):
+        self.query_one("#user-status-icon-label", Label).update("已登录" if logged_status else "未登录")
 
     @on(Button.Pressed, "#user-login-button")
-    @work(thread=True)
-    async def login(self) -> None:
-        if self.js_api.read_token() is False:
-            self.js_api.get_token()
-            return
-        await self.get_user_info()
+    @work(exclusive=True, group="login")
+    async def login(self):
+        token = await self.app.push_screen_wait(SessionScreen())
+        if token:
+            await self.verify_session(token, save=True)
 
-    @on(Button.Pressed, "#user-import-button")
-    @work(thread=True)
-    async def import_session(self) -> None:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
-        root.withdraw()
-        path = filedialog.askopenfilename(
-            title="选择本人久事会话文件",
-            filetypes=(("HAR 或 JSON", "*.har *.json"), ("所有文件", "*.*")),
-        )
-        root.destroy()
-        if not path:
-            return
+    async def verify_session(self, token, *, save):
+        status = self.query_one("#user-status-icon-label", Label)
+        status.update("正在验证账号…")
+        candidate = JSApi()
+        candidate.headers["token"] = token
         try:
-            self.js_api.token_getter.import_token_file(path)
-            logger.error("会话已导入，正在验证用户信息")
-            await self.get_user_info()
-        except Exception as error:
-            logger.error("会话导入失败：%s", error)
-            logger.debug(error, exc_info=True)
-
-
-    async def get_user_info(self) -> None:
-        try:
-            await self.js_api.get_user_info()
-            contacts = await self.js_api.get_contact()
+            user_info = await candidate.get_user_info()
+            contacts = await candidate.get_contact()
+            choices = []
+            for contact in contacts:
+                name = candidate.remove_non_printable(candidate.aes_decrypt(contact["fullName"], key=candidate.aes_key2))
+                choices.append((name, str(contact["id"])))
+            if save:
+                self.js_api.token_getter.save_token(token)
         except TokenExpiredError:
-            logger.error("Token 已过期，请重新登录")
-            self.post_message(self.LoggedStatusChanged(self, False))
+            status.update("凭证已失效，请更新" if not self.logged_status else "更新失败，原账号仍可用")
+            logger.error("登录凭证已失效，请重新获取后再试")
             return
-        except Exception as e:
-            self.logged_status = False
-            logger.error(f"获取用户信息失败")
-            logger.debug(e, exc_info=True)
+        except Exception:
+            status.update("验证失败，请重试" if not self.logged_status else "更新失败，原账号仍可用")
+            logger.error("账号验证失败，请检查凭证和网络后重试")
             return
-
+        self.js_api.headers = candidate.headers.copy()
+        self.js_api.user_info = user_info
+        self.js_api.phone = candidate.phone
+        self.js_api.contacts = contacts
+        self.query_one("#user-contact-select", Select).set_options(choices)
+        if len(choices) == 1:
+            self.query_one("#user-contact-select", Select).value = choices[0][1]
+        self.query_one("#user-id-num-label", Label).update(f"用户 {user_info['uid']}")
         self.logged_status = True
-        self.contact_list = []
-        for contact in contacts:
-            name = self.js_api.aes_decrypt(
-                contact["fullName"], key=self.js_api.aes_key2
-            )
-            name = self.js_api.remove_non_printable(name)
-            phone = self.js_api.aes_decrypt(
-                contact["phoneNumber"], key=self.js_api.aes_key2
-            )
-            phone = self.js_api.remove_non_printable(phone)
-            id = contact["id"]
-            self.contact_list.append((f"{name}_{phone}", id))
-
-        select: Select = self.query_one("#user-contact-select")
-        select.set_options(self.contact_list)
-
-        id_label: Label = self.query_one("#user-id-num-label")
-        id_label.update(self.js_api.user_info["uid"])
+        status.update("已登录")
+        logger.info("账号验证成功" if choices else "账号已登录，请在久事添加包场人")

@@ -18,6 +18,15 @@ Header {
   height: auto;
 }
 
+#main { overflow-y: auto; }
+UserInfoPanel { height: 9; min-height: 9; }
+GroundInfoPanel { height: auto; min-height: 22; }
+AppLogPanel { height: 1fr; min-height: 7; }
+UserInfoPanel Horizontal, GroundInfoPanel Horizontal { height: 3; }
+UserInfoPanel Horizontal > Label { margin: 1 2; }
+UserInfoPanel #user-login-button { margin: 1; }
+Header Button { margin: 0 1; height: 1; min-height: 1; }
+
 Label {
   color: $text-success;
 }
@@ -78,6 +87,8 @@ UserInfoPanel {
 }
 
 GroundInfoPanel {
+  Button { margin: 1 0; }
+  #booking-mode { width: 18; }
   #candidate-hint {
     margin: 0 1;
   }

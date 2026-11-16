@@ -111,6 +111,7 @@ class JSApi:
         verify = True
 
     def __init__(self):
+        self.headers = dict(self.headers)
         self.token_getter = TokenGetter()
         self.assets_path = Path(__file__).parent / "assets"
         self.verification = Verification(self.assets_path / "trace.json")
@@ -137,6 +138,7 @@ class JSApi:
             return False
 
     def clear_token(self):
+        self.headers.pop("token", None)
         self.token_getter.clear_token()
 
     def post_sign(self, payload_str):
@@ -195,10 +197,8 @@ class JSApi:
                     url, headers=self.headers, data=payload_str
                 )
 
-        logger.debug(f"headers: {response.request.headers}")
         logger.debug(f"url: {response.request.url}")
         logger.debug(f"content: {response.request.content}")
-        logger.debug(f"text: {response.text}")
 
         if "token.device.invalid" in response.text:
             raise TokenExpiredError("token expired")
@@ -222,10 +222,8 @@ class JSApi:
         async with httpx.AsyncClient(proxy=self.proxy, verify=self.verify) as client:
             response = await client.get(url, headers=self.headers, params=params)
 
-        logger.debug(f"headers: {response.request.headers}")
         logger.debug(f"url: {response.request.url}")
         logger.debug(f"content: {response.request.content}")
-        logger.debug(f"text: {response.text}")
 
         if "token.device.invalid" in response.text:
             raise TokenExpiredError("token expired")
@@ -256,6 +254,14 @@ class JSApi:
             raise ApiResponseNotExpectedError("API response not as expected")
         return ground_list
 
+    async def get_open_dates(self, venue_id):
+        response = await self.js_post(self.url_book_time, {"venueId": str(venue_id)})
+        data = response.json().get("data")
+        entries = data.get("venueBookModelList") if isinstance(data, dict) else None
+        if not isinstance(entries, list):
+            raise ApiResponseNotExpectedError("无法确认官方开放日期")
+        return {datetime.fromtimestamp(int(item["date"]) / 1000).date() for item in entries}
+
     async def get_venue_list(self, sports_name):
         payload = {
             "sportName": sports_name,
@@ -283,6 +289,8 @@ class JSApi:
             resp = await self.js_post(self.url_user, {})
             data = resp.json()
             user_info = data["data"]
+            if str(data.get("rtnCode")) != "10000" or not isinstance(user_info, dict) or not user_info.get("uid"):
+                raise TokenExpiredError("login required")
         except TokenExpiredError:
             raise
         except httpx.HTTPStatusError:
@@ -308,7 +316,9 @@ class JSApi:
         try:
             resp = await self.js_get(self.url_contact, params)
             data = resp.json()
-            cantacts = data["data"][1]["contacts"]
+            if str(data.get("rtnCode")) != "10000" or not isinstance(data.get("data"), list):
+                raise TokenExpiredError("login required")
+            cantacts = [person for group in data["data"] if group.get("type") == "CONTACT" for person in group.get("contacts", [])]
         except TokenExpiredError:
             raise
         except httpx.HTTPStatusError:

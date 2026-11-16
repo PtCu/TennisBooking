@@ -4,6 +4,8 @@ import logging
 from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
+from textual.widgets import Button
+from NotificationScreen import NotificationScreen
 
 from AppLogPanel import AppLogHandler, AppLogPanel
 from GroundInfoPanel import GroundInfoPanel
@@ -33,20 +35,29 @@ class Grounder(App):
         self.register_theme(default_theme)
         self.theme = "default"
 
+    @on(Button.Pressed, "#phone-settings")
+    def phone_settings(self):
+        self.push_screen(NotificationScreen())
+
     async def on_ready(self) -> None:
         root_logger = logging.getLogger()
         log_widgt = self.query_one("#app-log")
-        root_logger.addHandler(AppLogHandler(log_widgt))
+        self.ui_log_handler = AppLogHandler(log_widgt)
+        root_logger.addHandler(self.ui_log_handler)
 
-        logger.error("加载 JSApi")
         self.js_api = JSApi()
-        await self.js_api.verification.start_browser()
 
         user_info_panel = self.query_one(UserInfoPanel)
         await user_info_panel.app_load_done()
 
         ground_info_panel = self.query_one(GroundInfoPanel)
         ground_info_panel.app_load_done()
+
+    def on_unmount(self):
+        handler = getattr(self, "ui_log_handler", None)
+        if handler:
+            logging.getLogger().removeHandler(handler)
+            handler.close()
 
     @on(UserInfoPanel.LoggedStatusChanged)
     @on(GroundInfoPanel.LoggedStatusChanged)

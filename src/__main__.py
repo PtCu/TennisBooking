@@ -10,7 +10,7 @@
 # nuitka-project: --output-filename=Grounder.exe
 # nuitka-project: --company-name=https://github.com/XIGUAjuice
 # nuitka-project: --product-name=Grounder
-# nuitka-project: --product-version=1.0.0
+# nuitka-project: --product-version=1.1.0
 # nuitka-project: --copyright=https://github.com/XIGUAjuice
 # %%
 import logging
@@ -19,13 +19,14 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from app import Grounder
+from storage import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
 
 def config_logger():
     time_str = datetime.now().strftime("%Y_%m_%d_%H%M%S")
-    log_path = Path(__file__).parent / "logs"
+    log_path = DATA_DIR / "logs"
     log_path.mkdir(parents=True, exist_ok=True)
     log_file = log_path / f"Grounder_{time_str}.log"
     logging.basicConfig(
@@ -39,6 +40,7 @@ def config_logger():
 
 
 if __name__ == "__main__":
+    app = None
     try:
         config_logger()
         app = Grounder()
@@ -48,7 +50,7 @@ if __name__ == "__main__":
         logger.exception("发生未知错误，程序终止")
         return_code = 1
     finally:
-        broswer = app.js_api.verification.browser
+        broswer = getattr(getattr(getattr(app, "js_api", None), "verification", None), "browser", None)
         if broswer:
             asyncio.run(broswer.stop())
         sys.exit(return_code)

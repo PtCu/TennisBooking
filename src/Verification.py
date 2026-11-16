@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 class Verification:
     def __init__(self, trace_path):
+        self.browser = None
         with open(trace_path, "r") as f:
             trace = json.load(f)["trace"]
         trace = [
@@ -26,6 +27,8 @@ class Verification:
         self.browser = await zd.start(headless=True)
 
     async def solve(self, html_path):
+        if self.browser is None:
+            await self.start_browser()
         page = await self.browser.get(f"file://{Path(html_path).resolve()}")
         slider = await page.find("div[id='aliyunCaptcha-sliding-slider']")
         await self.move_slider(slider)
