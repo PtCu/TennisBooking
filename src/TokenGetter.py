@@ -18,10 +18,32 @@ class TokenGetter:
         self.assets_path = Path(__file__).parent / "assets"
 
     def get_token(self):
-        logger.error("未检测到本地登录凭证")
-        logger.error("为保护系统网络，程序不会修改 Windows 代理、安装证书或拦截微信流量")
-        logger.error("请准备有效的本地 token 后再点击登录")
+        logger.error("未检测到本地登录凭证，请先导入本人会话文件")
         return False
+
+    def import_token_file(self, path: str | Path):
+        source = Path(path)
+        data = json.loads(source.read_text(encoding="utf-8-sig"))
+        token = data.get("token") if isinstance(data, dict) else None
+        if not token and isinstance(data, dict) and isinstance(data.get("log"), dict):
+            for entry in data["log"].get("entries", []):
+                request = entry.get("request", {}) if isinstance(entry, dict) else {}
+                headers = request.get("headers", []) if isinstance(request, dict) else []
+                for header in headers:
+                    if str(header.get("name", "")).lower() == "token" and header.get("value"):
+                        token = header["value"]
+        if not token:
+            raise ValueError("文件中没有找到本人久事 token")
+        config_path = self.assets_path / "config.json"
+        config = {}
+        if config_path.exists() and config_path.stat().st_size:
+            try:
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                config = {}
+        config["token"] = token
+        config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+        return token
 
     def read_token(self):
         config_path = self.assets_path / "config.json"

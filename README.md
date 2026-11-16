@@ -45,13 +45,13 @@ powershell -ExecutionPolicy Bypass -File tools\build_release.ps1 -Python .venv\S
 
 1. 请先安装依赖 [node.js](https://nodejs.org/zh-cn/download)
 2. 强烈建议使用 [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701?hl=zh-CN&gl=CN) 运行程序获得更好的视觉效果
-3. 确认本地配置中已有有效 token。程序不会自动抓取 token，也不会改变系统网络设置
+3. 在官方客户端完成久事登录后导出本人 HAR 或 JSON 会话文件。程序只通过“导入会话文件”读取 token
 
 ### 2. 登录 🔐
 
 <img align="center" src="src/assets/log_in.png">
 
-点击「登录」后，程序会读取本地 token 并验证用户信息。没有 token 或 token 已失效时，程序会明确提示，需要先更新本地 token 后再重试。
+点击「导入会话文件」选择本人 HAR 或 JSON 文件，程序提取 token 后立即验证用户信息。验证通过后再选择包场人和场次。
 
 > 注意, 在手机或者其他地方再次打开小程序会使 token 失效，需要重新登录
 

@@ -58,6 +58,7 @@ class UserInfoPanel(ScrollableContainer):
             yield Middle(Button("登录", id="user-login-button"))
             yield Middle(Label("[b]用户ID：[/] ", id="user-id-label"))
             yield Middle(Label("", id="user-id-num-label"))
+            yield Middle(Button("导入会话文件", id="user-import-button"))
         with Horizontal():
             yield Middle(Label("[b]包场人信息：[/]", id="user-contact-label"))
             yield Middle(Select([], prompt="请选择包场人", id="user-contact-select"))
@@ -81,6 +82,29 @@ class UserInfoPanel(ScrollableContainer):
             self.js_api.get_token()
             return
         await self.get_user_info()
+
+    @on(Button.Pressed, "#user-import-button")
+    @work(thread=True)
+    async def import_session(self) -> None:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        path = filedialog.askopenfilename(
+            title="选择本人久事会话文件",
+            filetypes=(("HAR 或 JSON", "*.har *.json"), ("所有文件", "*.*")),
+        )
+        root.destroy()
+        if not path:
+            return
+        try:
+            self.js_api.token_getter.import_token_file(path)
+            logger.error("会话已导入，正在验证用户信息")
+            await self.get_user_info()
+        except Exception as error:
+            logger.error("会话导入失败：%s", error)
+            logger.debug(error, exc_info=True)
 
 
     async def get_user_info(self) -> None:
