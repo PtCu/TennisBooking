@@ -30,7 +30,7 @@ class UserInfoPanel(ScrollableContainer):
         with Horizontal():
             yield Label("未登录", id="user-status-icon-label")
             yield Label("", id="user-id-num-label")
-            yield Button("登录 / 更新凭证", id="user-login-button")
+            yield Button("登录 / 重新连接", id="user-login-button")
         with Horizontal():
             yield Label("包场人")
             yield Select([], prompt="登录后选择包场人", id="user-contact-select")
@@ -67,7 +67,7 @@ class UserInfoPanel(ScrollableContainer):
                 self.js_api.token_getter.save_token(token)
         except TokenExpiredError:
             status.update("凭证已失效，请更新" if not self.logged_status else "更新失败，原账号仍可用")
-            logger.error("登录凭证已失效，请重新获取后再试")
+            logger.error("登录已过期，请在久事小程序登录后重新连接")
             return
         except Exception:
             status.update("验证失败，请重试" if not self.logged_status else "更新失败，原账号仍可用")

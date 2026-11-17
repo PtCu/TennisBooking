@@ -162,7 +162,7 @@ Plan 3  备选方案
 
 ## 当前实现映射
 
-- `SessionScreen` 和 `UserInfoPanel` 负责会话导入、只读验证和包场人选择。
+- `SessionScreen` 和 `UserInfoPanel` 负责连接微信中的久事、只读验证和包场人选择，高级选项支持会话导入。`wechat_session.py` 在后台读取带有久事 AppID 与域名标记的小程序进程，候选会话经官方验证后才保存。
 - `GroundSelectScreen` 负责读取官方场次、显示开放状态并保留候选勾选。
 - `booking_flow` 定义 `BookingRequest`、`Plan`、`CandidateSlot`，按方案顺序匹配库存与预算。
 - `GroundInfoPanel` 负责候选预览、确认、立即或定时执行和停止任务。

@@ -11,7 +11,7 @@ from app import Grounder
 from TokenGetter import TokenGetter
 from GroundSelectScreen import GroundSelectScreen, GroundButton
 from FilePickerScreen import FilePickerScreen
-from textual.widgets import DirectoryTree
+from textual.widgets import DirectoryTree, Collapsible
 
 
 class InteractionTests(unittest.IsolatedAsyncioTestCase):
@@ -25,13 +25,19 @@ class InteractionTests(unittest.IsolatedAsyncioTestCase):
                     await pilot.pause()
                     await pilot.click("#user-login-button")
                     await pilot.pause()
-                    await pilot.click("#session-browse")
+                    app.screen.query_one(Collapsible).collapsed = False
+                    await pilot.pause()
+                    app.screen.query_one("#session-browse").focus()
+                    await pilot.pause()
+                    await pilot.press("enter")
                     await pilot.pause()
                     tree = app.screen.query_one(DirectoryTree)
                     tree.post_message(DirectoryTree.FileSelected(tree.root, file))
                     await pilot.pause()
                     self.assertEqual(app.screen.query_one("#session-path").value, str(file))
-                    await pilot.click("#session-cancel")
+                    app.screen.query_one("#session-cancel").focus()
+                    await pilot.pause()
+                    await pilot.press("enter")
 
     async def test_narrow_window_actions_and_dialogs_are_reachable(self):
         with patch.object(TokenGetter, "read_token", return_value=None), patch("OrdersScreen.trackable_records", return_value=[]):

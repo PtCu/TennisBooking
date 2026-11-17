@@ -243,7 +243,11 @@ class JSApi:
         try:
             resp = await self.js_post(self.url_ground, payload)
             data = resp.json()
-            ground_list = data["data"]["statusList"]
+            if str(data.get("rtnCode")) != "10000" or not isinstance(data.get("data"), dict):
+                raise ApiResponseNotExpectedError("场次查询失败")
+            ground_list = data["data"].get("statusList", [])
+            if not isinstance(ground_list, list):
+                raise ApiResponseNotExpectedError("场次数据格式异常")
         except TokenExpiredError:
             raise
         except httpx.HTTPStatusError:
