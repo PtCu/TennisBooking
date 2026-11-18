@@ -10,7 +10,7 @@
 # nuitka-project: --output-filename=Grounder.exe
 # nuitka-project: --company-name=https://github.com/XIGUAjuice
 # nuitka-project: --product-name=Grounder
-# nuitka-project: --product-version=1.4.1
+# nuitka-project: --product-version=1.4.2
 # nuitka-project: --copyright=https://github.com/XIGUAjuice
 # %%
 import logging

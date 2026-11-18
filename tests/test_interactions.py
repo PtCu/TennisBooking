@@ -2,19 +2,96 @@ import json
 import sys
 import unittest
 import tempfile
+from functools import partial
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from app import Grounder
 from TokenGetter import TokenGetter
 from GroundSelectScreen import GroundSelectScreen, GroundButton
 from FilePickerScreen import FilePickerScreen
+from orders import track_payment
 from textual.widgets import DirectoryTree, Collapsible
 
 
 class InteractionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_booking_confirmation_follows_fallback_order_through_payment(self):
+        day = (datetime.now() + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        start = int((day + timedelta(hours=12)).timestamp() * 1000)
+        end = start + 3600000
+        blocks = [
+            {"groundId": str(number), "groundName": f"{number}号", "sportsType": "网球", "price": "100", "status": "1"}
+            for number in (1, 2)
+        ]
+        inventory = [{"startTime": start, "endTime": end, "blockModel": blocks}]
+        venue = {"venueId": "v", "venueName": "网球馆", "agencyId": "a", "agencyName": "体育中心"}
+        order_list = {"totalNum": 1, "orderDetailModelList": [{"orderId": "o1", "venueId": "v"}]}
+        waiting_order = {
+            "orderDetailModel": {"orderId": "o1", "venueId": "v", "payAmount": 10000,
+                                 "payStatus": "PAY_WAIT", "orderPayMaxTime": start, "currentTime": start - 900000},
+            "venueBookGroundModelList": [{"groundId": "1", "groundName": "1号", "startTime": start, "endTime": end}],
+        }
+        paid_order = dict(waiting_order, orderDetailModel=dict(waiting_order["orderDetailModel"], payStatus="PAY_SUCCESS"))
+        notifier = Mock()
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(TokenGetter, "read_token", return_value=None),
+            patch("GroundInfoPanel.DATA_DIR", Path(directory)),
+            patch("GroundInfoPanel.track_payment", new=partial(track_payment, interval=0, checks=3)),
+            patch("orders.optional_notifier", return_value=notifier),
+        ):
+            app = Grounder()
+            async with app.run_test(size=(140, 45)) as pilot:
+                await pilot.pause()
+                api = app.js_api
+                api.session_copy = lambda: api
+                api.get_venue_list = AsyncMock(return_value=[venue])
+                api.get_open_dates = AsyncMock(return_value={day.date()})
+                api.get_ground = AsyncMock(return_value=inventory)
+                api.get_timestamps_from_now = lambda: [int(day.timestamp() * 1000)]
+                api.post_book = AsyncMock(return_value=True)
+                api.get_order_data = AsyncMock(side_effect=[
+                    {"totalNum": 0, "orderDetailModelList": []},
+                    order_list, waiting_order, waiting_order, waiting_order, paid_order,
+                ])
+                contact = app.query_one("#user-contact-select")
+                contact.set_options([("测试包场人", "contact")])
+                contact.value = "contact"
+                app.query_one("#ground-sports-select").value = "网球"
+                await pilot.pause()
+                venue_select = app.query_one("#ground-venue-select")
+                self.assertTrue(await pilot.click("#ground-button"))
+                await app.workers.wait_for_complete()
+                self.assertEqual(type(app.screen).__name__, "Screen")
+                self.assertEqual(api.get_ground.await_count, 0)
+                venue_select.focus()
+                await pilot.press("enter", "down", "enter")
+                await pilot.pause()
+                self.assertIsNotNone(venue_select.selection)
+                await pilot.click("#ground-button")
+                await pilot.pause()
+                for button in app.screen.query(GroundButton):
+                    await pilot.click(button)
+                await pilot.click("#ground-confirm-button")
+                await pilot.pause()
+                app.query_one("#fallback-one-type").value = "single_slot"
+                await pilot.pause()
+                app.query_one("#order-button").focus()
+                await pilot.press("enter")
+                await pilot.pause()
+                self.assertEqual(type(app.screen).__name__, "ConfirmScreen")
+                api.post_book.assert_not_awaited()
+                await pilot.click("#confirm-start")
+                await app.workers.wait_for_complete()
+                api.post_book.assert_awaited_once()
+                self.assertEqual([slot["groundId"] for slot in api.post_book.await_args.kwargs["ground_list"]], ["1"])
+                notifier.send.assert_called_once()
+                record_path, = (Path(directory) / "orders").glob("*.json")
+                record = json.loads(record_path.read_text(encoding="utf-8"))
+                self.assertEqual(record["state"], "payment-success")
+
     async def test_session_file_picker_returns_path_to_login(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(TokenGetter, "read_token", return_value=None):
             file = Path(directory) / "session.json"
@@ -102,7 +179,7 @@ class InteractionTests(unittest.IsolatedAsyncioTestCase):
                 api.get_timestamps_from_now = lambda: [midnight, midnight+86400000]
                 app.query_one("#ground-venue-select").set_options([("场馆", json.dumps({"venue_id": "v"}))])
                 app.query_one("#ground-venue-select").value = json.dumps({"venue_id": "v"})
-                screen = GroundSelectScreen([selected])
+                screen = GroundSelectScreen([selected], venue_id="v")
                 await app.push_screen(screen)
                 await pilot.pause()
                 self.assertTrue(screen.query_one(GroundButton).selected)

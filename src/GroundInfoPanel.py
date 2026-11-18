@@ -154,11 +154,15 @@ class GroundInfoPanel(ScrollableContainer):
     @work
     @on(Button.Pressed, "#ground-button")
     async def show_ground_select_screen(self):
-        if self.query_one("#ground-venue-select", Select).value is Select.BLANK:
+        venue_select = self.query_one("#ground-venue-select", Select)
+        venue = venue_select.selection
+        if venue is None:
             logger.error("请先选择场馆")
             return
-        selected = await self.app.push_screen_wait(GroundSelectScreen(self.grounds_selected))
-        if selected is not None:
+        selected = await self.app.push_screen_wait(
+            GroundSelectScreen(self.grounds_selected, venue_id=json.loads(venue)["venue_id"])
+        )
+        if selected is not None and venue_select.selection == venue:
             self.grounds_selected = selected
             self._update_candidate_summary()
 
@@ -266,8 +270,8 @@ class GroundInfoPanel(ScrollableContainer):
             logger.error("订场条件无效，请检查候选场次、方案和预算")
             return
 
-        contact_id = contact_select.value
-        if contact_id is Select.BLANK:
+        contact_id = contact_select.selection
+        if contact_id is None:
             logger.error("请先选择联系人")
             return
         api = self.js_api.session_copy()
@@ -320,11 +324,13 @@ class GroundInfoPanel(ScrollableContainer):
             logger.error("预定失败")
             logger.debug(error, exc_info=True)
 
-    @work
+    @work(exclusive=True, group="venue-list")
     @on(Select.Changed, "#ground-sports-select")
     async def update_venue(self, event):
         sports_name = event.value
-        if sports_name != Select.BLANK:
+        venue_select = self.query_one("#ground-venue-select", Select)
+        venue_select.set_options([])
+        if isinstance(sports_name, str):
             try:
                 venues = await self.js_api.get_venue_list(sports_name)
             except TokenExpiredError:
@@ -347,8 +353,8 @@ class GroundInfoPanel(ScrollableContainer):
                 }
                 venue_list.append((f"{venue['agencyName']} · {venue['venueName']}", json.dumps(venue_dict)))
 
-            venue_select: Select = self.query_one("#ground-venue-select")
-            venue_select.set_options(venue_list)
+            if event.select.selection == sports_name:
+                venue_select.set_options(venue_list)
 
     @on(Select.Changed, "#ground-venue-select")
     def clear_previous_selection(self):

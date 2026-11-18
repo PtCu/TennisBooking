@@ -1,4 +1,3 @@
-import json
 import logging
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -8,7 +7,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, Select, TabbedContent, TabPane
+from textual.widgets import Button, Label, TabbedContent, TabPane
 
 from JSApi import JSApi, TokenExpiredError
 from widgets.Table import TabelCell, TableRow
@@ -58,8 +57,9 @@ class GroundSelectScreen(ModalScreen):
         def control(self) -> "GroundSelectScreen":
             return self.sender
 
-    def __init__(self, selected=(), *, name=None, id=None, classes=None):
+    def __init__(self, selected=(), *, venue_id, name=None, id=None, classes=None):
         super().__init__(name=name, id=id, classes=classes)
+        self.venue_id = venue_id
         self.candidate_selection = {(str(item["groundId"]), str(item["startTime"]), str(item["endTime"])): dict(item) for item in selected}
         self.js_api: JSApi = self.app.js_api
 
@@ -145,18 +145,14 @@ class GroundSelectScreen(ModalScreen):
         time_container: Vertical = event.pane.query_one("#ground-time-container")
         await time_container.remove_children()
 
-        venue_select: Select = self.app.query_one("#ground-venue-select")
-        venue_info = json.loads(venue_select.value)
-        venue_id = venue_info["venue_id"]
-
         try:
-            dates = await self.js_api.get_open_dates(venue_id)
+            dates = await self.js_api.get_open_dates(self.venue_id)
             opened = datetime.fromtimestamp(table.timestamp / 1000).date() in dates
             self.query_one("#ground-date-status", Label).update("已开放预约" if opened else "尚未开放预约，以下场次为候选预览")
         except Exception:
             self.query_one("#ground-date-status", Label).update("暂时无法确认开放日期，请稍后重试")
 
-        dt_starts, ground_dict = await self.get_ground_dict(venue_id, table.timestamp)
+        dt_starts, ground_dict = await self.get_ground_dict(self.venue_id, table.timestamp)
 
         ground_name_labels = [
             Label(ground_name, classes="ground-name")
