@@ -138,7 +138,7 @@ class GroundSelectScreen(ModalScreen):
 
     @work(exclusive=True, group="load-ground")
     @on(TabbedContent.TabActivated)
-    async def show_grounds_info(self, event: TabbedContent.TabActivated) -> None:
+    async def show_grounds_info(self, event) -> None:
         table: GroundTable = event.pane.query_one("GroundTable")
         await table.remove_children()
 

@@ -322,7 +322,7 @@ class GroundInfoPanel(ScrollableContainer):
 
     @work
     @on(Select.Changed, "#ground-sports-select")
-    async def update_venue(self, event: Select.Changed):
+    async def update_venue(self, event):
         sports_name = event.value
         if sports_name != Select.BLANK:
             try:

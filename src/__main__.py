@@ -10,7 +10,7 @@
 # nuitka-project: --output-filename=Grounder.exe
 # nuitka-project: --company-name=https://github.com/XIGUAjuice
 # nuitka-project: --product-name=Grounder
-# nuitka-project: --product-version=1.4.0
+# nuitka-project: --product-version=1.4.1
 # nuitka-project: --copyright=https://github.com/XIGUAjuice
 # %%
 import logging
@@ -47,12 +47,19 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--check"]:
         import execjs
         import json
+        import inspect
+        from GroundInfoPanel import GroundInfoPanel
+        from GroundSelectScreen import GroundSelectScreen
         try:
+            # Textual inspects these callbacks at dispatch time, including in frozen builds.
+            for handler in (GroundInfoPanel.update_venue, GroundSelectScreen.show_grounds_info,
+                            Grounder.update_logged_status):
+                inspect.signature(handler)
             ready = execjs.eval("1 + 1") == 2
-            print(json.dumps({"ready": ready, "javascript": execjs.get().name}))
+            print(json.dumps({"ready": ready, "javascript": execjs.get().name, "ui_handlers": True}))
             sys.exit(0 if ready else 1)
         except Exception:
-            print(json.dumps({"ready": False, "error": "JavaScript runtime unavailable"}))
+            print(json.dumps({"ready": False, "error": "Runtime or UI handler check failed"}))
             sys.exit(1)
     app = None
     try:

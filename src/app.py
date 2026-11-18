@@ -67,14 +67,7 @@ class Grounder(App):
     @on(UserInfoPanel.LoggedStatusChanged)
     @on(GroundInfoPanel.LoggedStatusChanged)
     @on(GroundSelectScreen.LoggedStatusChanged)
-    def update_logged_status(
-        self,
-        message: (
-            UserInfoPanel.LoggedStatusChanged
-            | GroundInfoPanel.LoggedStatusChanged
-            | GroundSelectScreen.LoggedStatusChanged
-        ),
-    ) -> None:
+    def update_logged_status(self, message) -> None:
         user_info_panel = self.query_one(UserInfoPanel)
         user_info_panel.logged_status = message.logged_status
         if message.logged_status is False:
