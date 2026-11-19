@@ -58,7 +58,6 @@ class UserInfoPanel(ScrollableContainer):
             yield Middle(Label("[b]状态：[/]", id="user-status-label"))
             yield Middle(Label(self.LOG_OUT, id="user-status-icon-label"))
             yield Middle(Button("登录", id="user-login-button"))
-            yield Middle(Button("抓包兜底", id="user-proxy-button"))
             yield Middle(Label("[b]用户ID：[/] ", id="user-id-label"))
             yield Middle(Label("", id="user-id-num-label"))
         with Horizontal():
@@ -79,13 +78,6 @@ class UserInfoPanel(ScrollableContainer):
             logger.error("正在登录中，请稍候...")
             return
         self.login(allow_proxy=False, force_scan=True)
-
-    @on(Button.Pressed, "#user-proxy-button")
-    def proxy_pressed(self) -> None:
-        if self.login_busy:
-            logger.error("正在登录中，请稍候...")
-            return
-        self.login(allow_proxy=True, force_scan=True)
 
     @work(group="user-login")
     async def login(self, allow_proxy: bool = False, force_scan: bool = False) -> None:

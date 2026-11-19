@@ -120,6 +120,8 @@ GroundInfoPanel {
   #ground-selected-summary {
     color: $warning;
     padding: 0 1;
+    width: 1fr;
+    height: auto;
   }
   #retry-label {
     padding: 0 0 0 0;
@@ -139,6 +141,12 @@ GroundInfoPanel {
   }
   #dry-run-switch {
     margin: 0 1;
+    height: 1;
+    border: none;
+    padding: 0;
+  }
+  #budget-input {
+    width: 8;
   }
   #time-select {
     width: auto;
@@ -157,11 +165,53 @@ GroundSelectScreen {
   align: center middle;
 
   #ground-select-container {
-    height: 90%;
-    width: 92%;
+    height: 92%;
+    width: 94%;
     background: $surface;
     border: round $accent;
     padding: 1;
+  }
+
+  #ground-select-tip {
+    color: $text-muted;
+    padding: 0 1;
+  }
+
+  #ground-brush-bar {
+    height: auto;
+    align-vertical: middle;
+    padding: 0 1;
+    margin: 0 0 1 0;
+    Input {
+      height: 1;
+      width: 13;
+      border: none;
+      padding: 0 1;
+      margin: 0 1 0 0;
+    }
+    #smart-budget-input {
+      width: 8;
+    }
+    .brush-btn {
+      min-width: 7;
+      margin: 0 1 0 0;
+      padding: 0 1;
+    }
+    .brush-1 { background: #1e4d2b; color: #7dff9b; }
+    .brush-2 { background: #1c3d5a; color: #7fd4ff; }
+    .brush-3 { background: #3f2259; color: #e2a4ff; }
+    .brush-4 { background: #5a3816; color: #ffcb7d; }
+    .brush-active {
+      background: $warning;
+      color: $background;
+      text-style: bold;
+    }
+  }
+
+  #ground-group-preview {
+    color: $warning;
+    padding: 0 1;
+    height: auto;
   }
 
   #ground-tabs {
@@ -183,7 +233,7 @@ GroundSelectScreen {
     align: center middle;
 
     Button {
-      margin: 1 10;
+      margin: 0 8;
     }
   }
 
@@ -211,9 +261,28 @@ GroundSelectScreen {
       color: $warning;
     }
 
-    &.selected {
-      background: $success-muted;
-      color: $text-success;
+    &.grp-1 {
+      background: #1e5f34;
+      color: #a6ffbe;
+      text-style: bold;
+    }
+    &.grp-2 {
+      background: #1b4d78;
+      color: #a8e2ff;
+      text-style: bold;
+    }
+    &.grp-3 {
+      background: #512b73;
+      color: #eabaff;
+      text-style: bold;
+    }
+    &.grp-4 {
+      background: #734517;
+      color: #ffd79a;
+      text-style: bold;
+    }
+    &.waitlist-selected {
+      text-style: bold underline;
     }
   }
 

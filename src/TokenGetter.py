@@ -171,33 +171,43 @@ class TokenGetter:
             _k32.CloseHandle(snap)
         return out
 
-    def _fetch_cmdlines(self) -> dict[int, str]:
-        ps = (
-            "Get-CimInstance Win32_Process -Filter "
-            "\"Name='WeChatAppEx.exe' OR Name='Weixin.exe' OR Name='WeChat.exe'\" "
-            "| Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
-        )
-        try:
-            r = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=6,
-            )
-            if r.returncode != 0 or not r.stdout.strip():
-                return {}
-            data = json.loads(r.stdout)
-            if isinstance(data, dict):
-                data = [data]
-            return {
-                int(item["ProcessId"]): str(item.get("CommandLine") or "")
-                for item in data
-                if "ProcessId" in item
-            }
-        except Exception:
-            return {}
+    def _fetch_cmdlines(self, pids: list[int] | None = None) -> dict[int, str]:
+        """纯 Win32 NtQueryInformationProcess 读取命令行，避免派生 powershell 子进程触发 conhost 崩溃。"""
+        class _UNICODE_STRING(ctypes.Structure):
+            _fields_ = [
+                ("Length", wintypes.USHORT),
+                ("MaximumLength", wintypes.USHORT),
+                ("Buffer", ctypes.c_void_p),
+            ]
+
+        ntdll = ctypes.WinDLL("ntdll")
+        out: dict[int, str] = {}
+        target_pids = pids if pids is not None else [p for p, _ in self._list_wechat_processes()]
+        for pid in target_pids:
+            h = _k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                continue
+            try:
+                needed = wintypes.ULONG(0)
+                ntdll.NtQueryInformationProcess(h, 60, None, 0, ctypes.byref(needed))
+                if needed.value:
+                    buf = ctypes.create_string_buffer(needed.value)
+                    if (
+                        ntdll.NtQueryInformationProcess(
+                            h, 60, buf, needed.value, ctypes.byref(needed)
+                        )
+                        == 0
+                    ):
+                        us = _UNICODE_STRING.from_buffer_copy(
+                            buf.raw[: ctypes.sizeof(_UNICODE_STRING)]
+                        )
+                        if us.Buffer and us.Length > 0:
+                            out[pid] = ctypes.wstring_at(us.Buffer, us.Length // 2)
+            except Exception:
+                pass
+            finally:
+                _k32.CloseHandle(h)
+        return out
 
     def _scan_process_memory(self, pid: int, deep: bool = False, max_region: int = 16 * 1024 * 1024):
         h = _k32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
@@ -332,7 +342,7 @@ class TokenGetter:
             logger.error("未找到微信进程，请先在电脑微信打开「久事体育APP」小程序")
             return False
 
-        cmdlines = self._fetch_cmdlines()
+        cmdlines = self._fetch_cmdlines([p for p, _ in procs])
 
         def _score(item: tuple[int, str]) -> tuple[int, int]:
             pid, name = item
@@ -353,57 +363,40 @@ class TokenGetter:
         broad: list[str] = []
 
         with httpx.Client(http1=True, verify=True, trust_env=False, timeout=15) as cli:
-            # Pass 1: 高速上下文 + 锚点扫描（通常 1~2 秒命中）
-            for deep in (False, True):
-                for pid, name in ranked:
-                    if not deep and name.lower() != "wechatappex.exe":
-                        continue
-                    ok, err, ctx_h, anc_h, brd_h = self._scan_process_memory(pid, deep=deep)
-                    if not ok:
-                        open_errors.append(err)
-                        continue
-                    any_open = True
-                    for tok in ctx_h:
-                        if tok not in seen:
-                            seen.add(tok)
-                            if self.verify_token(tok, client=cli):
-                                self.save_token(tok)
-                                logger.error("成功从微信内存读取到有效 token！")
-                                return True
-                    for tok in anc_h:
-                        if tok not in seen:
-                            seen.add(tok)
-                            ctx_anchor.append(tok)
-                    for tok in brd_h:
-                        if tok not in seen:
-                            seen.add(tok)
-                            broad.append(tok)
-
-                for tok in ctx_anchor:
-                    if self.verify_token(tok, client=cli):
-                        self.save_token(tok)
-                        logger.error("成功从微信内存读取到有效 token！")
-                        return True
-                ctx_anchor.clear()
+            # 仅扫描 WeChatAppEx 渲染进程（不扫 1GB 的 Weixin.exe / gpu-process，1~2 秒内出结果）
+            saw_expired_candidate = False
+            for pid, name in ranked:
+                if name.lower() != "wechatappex.exe":
+                    continue
+                cmd = cmdlines.get(pid, "").lower()
+                if "--type=" in cmd and "--type=renderer" not in cmd:
+                    continue
+                ok, err, ctx_h, anc_h, _brd_h = self._scan_process_memory(pid, deep=False)
+                if not ok:
+                    open_errors.append(err)
+                    continue
+                any_open = True
+                for tok in ctx_h + anc_h:
+                    if tok not in seen:
+                        seen.add(tok)
+                        if self.verify_token(tok, client=cli):
+                            self.save_token(tok)
+                            logger.error("成功从微信内存读取到有效 token！")
+                            return True
+                        saw_expired_candidate = True
 
             if not any_open:
                 if 5 in open_errors:
-                    logger.error("无法读取微信进程内存（权限不足），请尝试以管理员身份运行或改用「抓包兜底」")
+                    logger.error("无法读取微信进程内存（权限不足），请尝试以管理员身份运行")
                 else:
-                    logger.error("无法打开微信进程，请确认电脑微信正常运行")
+                    logger.error("未找到小程序渲染进程，请先在电脑微信打开「久事体育APP」→ 点进「场馆」页")
                 return False
 
-            for tok in broad[:20]:
-                if self.verify_token(tok, client=cli):
-                    self.save_token(tok)
-                    logger.error("成功从微信内存读取到有效 token！")
-                    return True
-
-            logger.error("微信进程已读取但未发现有效登录态，请在电脑微信「久事体育APP」点进「场馆」页后重试，或点「抓包兜底」")
+            if saw_expired_candidate:
+                logger.error("微信内存中的登录态已失效（可能曾在手机打开过小程序）。请在电脑微信「久事体育APP」点一下「场馆」页刷新，再点「登录」")
+            else:
+                logger.error("未在微信内存中发现登录态，请在电脑微信「久事体育APP」点进「场馆」页后再点「登录」")
             return False
-
-        logger.error("微信内存中的候选 token 均未通过验证，请在小程序里刷新「场馆」页后再试，或点「抓包登录」")
-        return False
 
     def run_mitmproxy(self):
         subprocess.run(
@@ -414,7 +407,11 @@ class TokenGetter:
                 "-q",
                 "-p",
                 str(self.port),
-            ]
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
     def get_token(self, allow_proxy: bool = False):
@@ -476,10 +473,12 @@ class TokenGetter:
         try:
             cert_info = subprocess.run(
                 ["certutil", "-store", "root"],
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 check=True,
                 encoding="gb2312",
                 errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             ).stdout
         except Exception as e:
             logger.error("无法自动检测证书，请确保证书已安装")
@@ -513,8 +512,10 @@ class TokenGetter:
                     "root",
                     (self.assets_path / "mitmproxy-ca-cert.cer").as_posix(),
                 ],
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 check=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except Exception as e:
             logger.error("证书安装失败，第一次使用请确保使用管理员权限运行此程序")
@@ -525,13 +526,17 @@ class TokenGetter:
         return True
 
     def back_up_proxy(self):
-        proxy = {"ProxyEnable": "", "ProxyServer": "", "ProxyOverride": ""}
-        for name in proxy.keys():
-            cmd = rf'(Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings").{name}'
-            result = subprocess.run(
-                ["powershell", "-Command", cmd], capture_output=True, text=True
-            ).stdout
-            proxy[name] = result.strip()
+        import winreg
+
+        reg_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        proxy = {}
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path) as key:
+            for name in ("ProxyEnable", "ProxyServer", "ProxyOverride"):
+                try:
+                    val, kind = winreg.QueryValueEx(key, name)
+                    proxy[name] = (val, kind)
+                except FileNotFoundError:
+                    proxy[name] = None
         return proxy
 
     def _notify_wininet(self):
@@ -543,27 +548,29 @@ class TokenGetter:
             pass
 
     def restore_proxy(self, proxy: dict):
-        for name, value in proxy.items():
-            if name == "ProxyEnable":
-                val_expr = str(int(value)) if str(value).isdigit() else "0"
-                cmd = rf'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name {name} -Value {val_expr}'
-            else:
-                cmd = rf'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name {name} -Value "{value}"'
-            subprocess.run(["powershell", "-Command", cmd])
+        import winreg
+
+        reg_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path, 0, winreg.KEY_SET_VALUE) as key:
+            for name, saved in proxy.items():
+                if saved is None:
+                    try:
+                        winreg.DeleteValue(key, name)
+                    except FileNotFoundError:
+                        pass
+                else:
+                    val, kind = saved
+                    winreg.SetValueEx(key, name, 0, kind, val)
         self._notify_wininet()
 
     def set_proxy(self):
-        proxy = {
-            "ProxyEnable": "1",
-            "ProxyServer": f"127.0.0.1:{self.port}",
-            "ProxyOverride": "<local>",
-        }
-        for name, value in proxy.items():
-            if name == "ProxyEnable":
-                cmd = rf'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name {name} -Value 1'
-            else:
-                cmd = rf'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name {name} -Value "{value}"'
-            subprocess.run(["powershell", "-Command", cmd])
+        import winreg
+
+        reg_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, f"127.0.0.1:{self.port}")
+            winreg.SetValueEx(key, "ProxyOverride", 0, winreg.REG_SZ, "<local>")
+            winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 1)
         self._notify_wininet()
 
 

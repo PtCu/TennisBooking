@@ -1,4 +1,5 @@
 import logging
+import threading
 
 from rich.logging import RichHandler
 from textual.widgets import RichLog
@@ -18,6 +19,7 @@ class AppLogPanel(RichLog):
 
 class AppLogHandler(RichHandler):
     def __init__(self, widget: AppLogPanel, *args, **kwargs):
+        self._widget = widget
         super().__init__(
             console=widget,
             rich_tracebacks=False,
@@ -29,3 +31,13 @@ class AppLogHandler(RichHandler):
         )
         formatter = logging.Formatter("%(message)s")
         self.setFormatter(formatter)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            app = getattr(self._widget, "app", None)
+            if app is not None and getattr(app, "_thread_id", None) not in (None, threading.get_ident()):
+                app.call_from_thread(super().emit, record)
+                return
+            super().emit(record)
+        except Exception:
+            pass
