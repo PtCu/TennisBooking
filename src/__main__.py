@@ -15,11 +15,16 @@
 # nuitka-project: --product-version=1.0.0
 # nuitka-project: --copyright=https://github.com/XIGUAjuice
 # %%
+import asyncio
 import logging
 import sys
-import asyncio
 from datetime import datetime
 from pathlib import Path
+
+SRC_DIR = Path(__file__).resolve().parent
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 from app import Grounder
 
 logger = logging.getLogger(__name__)
@@ -27,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 def config_logger():
     time_str = datetime.now().strftime("%Y_%m_%d_%H%M%S")
-    log_path = Path(__file__).parent / "logs"
+    log_path = SRC_DIR / "logs"
     log_path.mkdir(parents=True, exist_ok=True)
     log_file = log_path / f"Grounder_{time_str}.log"
     logging.basicConfig(
@@ -41,16 +46,22 @@ def config_logger():
 
 
 if __name__ == "__main__":
+    app = None
+    return_code = 0
     try:
         config_logger()
         app = Grounder()
         app.run()
-        return_code = app.return_code
-    except Exception as e:
+        return_code = app.return_code or 0
+    except Exception:
         logger.exception("发生未知错误，程序终止")
         return_code = 1
     finally:
-        broswer = app.js_api.verification.browser
-        if broswer:
-            asyncio.run(broswer.stop())
+        js_api = getattr(app, "js_api", None)
+        ver = getattr(js_api, "verification", None)
+        browser = getattr(ver, "browser", None)
+        if browser:
+            asyncio.run(browser.stop())
+        if js_api is not None:
+            js_api.close()
         sys.exit(return_code)
